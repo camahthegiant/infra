@@ -255,7 +255,15 @@ services:
   grafana:
     # Fijada. Es lo único con una puerta a internet: al actualizar, mirar sus
     # avisos de seguridad.
-    image: grafana/grafana:13.2.4
+    #
+    # SERIE 12.4 A PROPÓSITO, no la 13 (que es más reciente). Medido con la
+    # misma configuración y la misma carga de consultas, en paralelo:
+    #   13.2.4  ->  300-320 MB, pegada al tope del contenedor
+    #   12.4.13 ->  114-118 MB, estable
+    # En un VPS de 4 GB y sin swap, tres veces más memoria no se justifica para
+    # un dashboard. 12.4 sigue recibiendo parches (12.4.13 salió el 2026-10-13,
+    # el mismo día que 13.2.4). Si algún día se pasa a la 13, repetir la medida.
+    image: grafana/grafana:12.4.13
     restart: unless-stopped
 
     environment:
@@ -290,6 +298,37 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
 
+      # Apagar lo que NO usamos, medido: Grafana 13 con todo activo llegó a
+      # ~200 MB de memoria VIVA (no basura) y rozaba el tope del contenedor.
+      #  - Motor de alertas integrado: nuestras alertas las evalúa Prometheus
+      #    (prometheus/rules/alerts.yml) y las envía Alertmanager. Tener
+      #    además el de Grafana duplicaría el trabajo y la RAM.
+      #  - Preinstalación de plugins: por defecto descarga ~18 plugins de
+      #    grafana.com al arrancar. Solo usamos el de Prometheus, que ya viene
+      #    incluido; así además no hay tráfico saliente al arrancar.
+      GF_UNIFIED_ALERTING_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+
+      # Techo de memoria para el recolector de basura de Go. Sin esto Go solo
+      # limpia cuando el heap se DUPLICA respecto a lo vivo, y en un contenedor
+      # con tope duro eso puede llevarlo al OOM antes de limpiar. Con GOMEMLIMIT,
+      # Go limpia con más frecuencia al acercarse a este valor. Debe quedar por
+      # debajo de mem_limit (~80 %) para dejar margen a lo que no es heap
+      # (pilas, mapeos). Con 12.4 el uso real es ~115 MB: esto es solo red de
+      # seguridad.
+      GOMEMLIMIT: 150MiB
+
+      # Al entrar, Grafana abre directamente la portada (vps.json, generado
+      # por grafana/tools/gen_vps_dashboard.py) en vez de su página de
+      # bienvenida. La ruta es la del contenedor: la misma carpeta que se monta
+      # en "volumes" más abajo.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/vps.json
+
+      # Tema oscuro por defecto: es el que mejor hace destacar el rojo y el
+      # verde de los estados, que es el único color con significado aquí. Cada
+      # usuario puede cambiarlo en su perfil.
+      GF_USERS_DEFAULT_THEME: dark
+
     volumes:
       # Su base de datos (SQLite): usuarios y preferencias. Sin él, cada
       # redeploy te devolvería a cero.
@@ -301,13 +340,13 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
 
-    # MEDIDO en local (2026-10-15): 141 MB a los 2 minutos de arrancar, en
-    # reposo. Grafana crece con el uso (dashboards abiertos, caché de
-    # consultas, sesiones), así que 192 MB dejaba solo ~50 MB de margen y el
-    # kernel acabaría matándolo (OOM) y reiniciándolo. 256 MB deja holgura; la
-    # suma de topes de todo el stack queda en ~750 MB sobre ~1500 MB disponibles
-    # en el VPS. Revisar con datos reales tras el despliegue.
-    mem_limit: 256m
+    # MEDIDO en local (2026-10-15), Grafana 12.4.13 con el motor de alertas y
+    # la preinstalación de plugins apagados: 114 MB en reposo y 114-118 MB tras
+    # 7 rondas de las 12 consultas de la portada. 192 MB deja ~75 MB de margen.
+    # (Con la 13.2.4 el mismo test llegó a 320 MB y rozó el tope: ver la nota de
+    # la imagen.) La suma de topes de todo el stack queda en ~690 MB sobre
+    # ~1500 MB disponibles en el VPS. Revisar con datos reales del VPS.
+    mem_limit: 192m
 
     # Sin "ports:": entra por Traefik, que es quien habla con internet. Estos
     # labels son los mismos que usan Paufer, Gast-On y Multas (router, HTTPS,
