@@ -28,9 +28,11 @@ monitoring/
 │   ├── provisioning/
 │   │   ├── datasources/prometheus.yml   # de dónde lee datos (uid fijo: "prometheus")
 │   │   └── dashboards/dashboards.yml    # en qué carpeta busca dashboards
-│   └── dashboards/
-│       └── vps.json            # el dashboard (JSON: sin comentarios; el porqué está en
-│                               #   el campo "description" de cada panel)
+│   ├── dashboards/
+│   │   └── vps.json            # la portada (GENERADO; JSON no admite comentarios: el porqué
+│   │                           #   está en el campo "description" de cada panel)
+│   └── tools/
+│       └── gen_vps_dashboard.py  # fuente real de vps.json, comentada. Editar aquí y regenerar
 └── prometheus/
     ├── prometheus.yml          # a quién pregunta Prometheus y cada cuánto
     ├── rules/
@@ -100,18 +102,42 @@ sin registro ni acceso anónimo, cookie solo por HTTPS. Lee de Prometheus con `a
 (las consultas las hace el servidor, por eso Prometheus no se publica).
 
 Todo es código: datasource y dashboard se cargan desde `grafana/` en solo lectura. Lo que se
-cambie a mano en la interfaz **se pierde** al reiniciar; el flujo es ajustar un panel en la
-interfaz, copiar el JSON al repo y commitearlo.
+cambie a mano en la interfaz **se pierde** al reiniciar. El dashboard se **genera**:
 
-| Panel | Consulta | Responde a |
+```bash
+python3 monitoring/grafana/tools/gen_vps_dashboard.py   # reescribe grafana/dashboards/vps.json
+```
+
+Para cambiar un color, un umbral o una consulta se edita el script (cada decisión de diseño
+lleva su comentario) y se regenera. Grafana recoge el cambio solo en ~30 s.
+
+### La portada: "VPS · visión general"
+
+Es la página de inicio de Grafana (`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`) y viene en modo
+oscuro. Diseñada para que lo importante se vea en dos segundos y el detalle exista sin estorbar.
+Color con significado: verde / naranja / rojo **solo** para estado.
+
+| Pieza | Consulta | Responde a |
 |---|---|---|
-| Estado de los servicios | `probe_success` | ¿Responden las 6 URLs? |
-| Tiempo de respuesta | `probe_duration_seconds` | ¿Va lenta alguna? |
-| Días hasta caducar el certificado | `(probe_ssl_earliest_cert_expiry - time()) / 86400` | ¿Renovó Traefik? |
-| RAM disponible del VPS | `node_memory_MemAvailable_bytes` | ¿Cuánto margen queda? (línea = 300 MB, la alerta) |
-| CPU del VPS | `1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))` | ¿Está saturado? |
-| Memoria por contenedor | `container_memory_working_set_bytes{name!=""}` | ¿Quién gasta la RAM? |
-| Reinicios por contenedor (1 h) | `changes(container_start_time_seconds{name!=""}[1h])` | ¿Algo en bucle? |
+| Banner "Estado general" | `min(probe_success)` | ¿Está todo bien? |
+| Tarjeta por app (repetida) | `probe_success{app="$app"}` | ¿Web y API de esa app responden? |
+| Línea de tiempo | `probe_success` | ¿Cuándo cayó algo y cuánto duró? |
+| RAM libre | `MemAvailable / MemTotal` | ¿Cuánto margen queda? (rojo ≈ 300 MB, la alerta) |
+| CPU en uso | `1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))` | ¿Está saturado? |
+| Disco `/` | `1 - avail / size` | ¿Se llena? (aún sin alerta) |
+| Certificado (días) | `min((expiry - time()) / 86400)` | ¿Renovó Traefik? |
+| *Detalle (plegado)* | tiempo de respuesta, memoria por contenedor, reinicios | Profundizar cuando una alerta pregunta "por qué" |
+
+La tarjeta de app es **una sola definición repetida** por la variable oculta `app`, que sale de
+la etiqueta `app` de las sondas (`prometheus.yml`): una app nueva crea su tarjeta sola.
+
+### Por qué no se copiaron dashboards de la comunidad
+
+Se evaluaron los más usados de grafana.com (Node Exporter Full 1860, Blackbox 16124, cAdvisor
+19792) y se descartaron: son ~250 paneles para un VPS con tres apps, ~20 saldrían permanentemente
+en "No data", obligaban a cambiar nuestras métricas y etiquetas para encajar con los de otros
+(`cluster`, `container_fs_*`) y su licencia no consta. Si un incidente pide el detalle de CPU o
+red, se importan en 30 s desde Grafana (*Dashboards → Import → 1860*) sin mantener nada.
 
 **Trampa de la contraseña de admin:** `GRAFANA_ADMIN_PASSWORD` solo se aplica **la primera
 vez**, al crear el volumen `grafana_data`. Después vive cifrada dentro de la base de datos y la
@@ -202,6 +228,13 @@ sabotear una regla (quitar el `for`, subir un umbral) los hace fallar.
   Grafana es la única excepción y entra por Traefik (labels), sin `ports:`.
 - **Configuración de Grafana como código y en solo lectura.** Reproducible desde el repo; el
   precio es que lo cambiado a mano en la interfaz no sobrevive.
+- **Grafana 12.4, no la 13.** Medido con la misma configuración y carga: 13.2.4 pesaba 300-320 MB
+  (pegada al tope) y 12.4.13 114-118 MB, estable. En un VPS de 4 GB sin swap, 3× más memoria no
+  se justifica. 12.4 sigue recibiendo parches. Si se sube a la 13, repetir la medida.
+- **Apagado lo que no se usa en Grafana:** su motor de alertas (las evalúa Prometheus) y la
+  preinstalación de plugins. Menos memoria y ningún tráfico saliente al arrancar.
+- **Medir antes de fijar un tope.** Mi estimación de memoria de Grafana (100-150 MB) falló con la
+  13 en un factor 2-3: por eso cada `mem_limit` lleva su medida en un comentario.
 - **`docker-compose.local.yml` aparte.** Para no tocar el de producción y que no se pueda
   publicar Prometheus en el VPS por un descuido.
 
@@ -218,16 +251,16 @@ sabotear una regla (quitar el `for`, subir un umbral) los hace fallar.
 
 | Servicio | RAM | Tope |
 |---|---|---|
-| grafana | 141 MB | 256 MB (subido desde 192 al medir: dejaba ~50 MB de margen) |
-| prometheus | 79 MB | 256 MB |
-| cadvisor | 34 MB | 128 MB |
-| blackbox_exporter | 17 MB | 32 MB |
-| alertmanager | 16 MB | 48 MB |
-| node_exporter | 13 MB | 32 MB |
-| **Total** | **~300 MB** | ~750 MB |
+| grafana 12.4.13 | 114-118 MB (estable bajo carga) | 192 MB |
+| prometheus | 79-105 MB | 256 MB |
+| cadvisor | 34-47 MB | 128 MB |
+| blackbox_exporter | 17-24 MB | 32 MB |
+| alertmanager | 15 MB | 48 MB |
+| node_exporter | 13-15 MB | 32 MB |
+| **Total** | **~280-320 MB** | ~690 MB |
 
-Pendiente de confirmar en el VPS, con ~16 contenedores y días de datos: Prometheus crece con el
-tiempo y Grafana con el uso.
+(Grafana 13.2.4 en la misma prueba: 300-320 MB, pegada a un tope de 320.) Pendiente de
+confirmar en el VPS, con ~16 contenedores y días de datos: Prometheus crece con el tiempo.
 
 ---
 
