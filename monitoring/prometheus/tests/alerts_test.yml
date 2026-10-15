@@ -1,0 +1,157 @@
+# Tests unitarios de las reglas de alerta (prometheus/rules/alerts.yml).
+#
+# "promtool check rules" solo comprueba que las reglas están BIEN ESCRITAS.
+# No comprueba que HAGAN lo que queremos: una regla puede ser sintácticamente
+# perfecta y no saltar nunca, o saltar siempre. Aquí se le dan a promtool
+# series de datos inventadas ("la sonda valía 1 y a los 2 minutos pasó a 0") y
+# se le dice qué alertas se esperan en cada instante.
+#
+# No necesita Docker corriendo ni el token: encaja en el CI.
+# Se ejecuta con: promtool test rules prometheus/tests/alerts_test.yml
+#
+# Notación de valores: 'axn' repite a (n+1 valores en total), '_' es "sin dato".
+#   '1x4 0x10'  ->  1 1 1 1 1  0 0 0 0 0 0 0 0 0 0 0
+#
+# LIMITACIÓN: estos tests prueban la lógica con datos que se inventan aquí. Si
+# en el mundo real una métrica se comportara distinto de como se simula, el
+# test pasaría y la regla fallaría. No sustituye a comprobarlo en el VPS.
+
+# Ruta relativa a ESTE fichero.
+rule_files:
+  - ../rules/alerts.yml
+
+# Mismo ritmo que evaluation_interval de prometheus.yml.
+evaluation_interval: 30s
+
+tests:
+
+  # ---------------------------------------------------------------------------
+  # ServicioCaido: salta tras 2 minutos seguidos con la sonda a 0.
+  # ---------------------------------------------------------------------------
+  - interval: 30s
+    input_series:
+      # Sonda bien durante 2 min y luego a 0 de forma sostenida.
+      - series: 'probe_success{instance="https://app.paufer.es"}'
+        values: '1x4 0x10'
+    alert_rule_test:
+      # Lleva ~1 min en 0: la condición se cumple pero aún no han pasado los
+      # 2 minutos del "for". No debe haber alerta.
+      - eval_time: 3m
+        alertname: ServicioCaido
+        exp_alerts: []
+      # Ya lleva más de 2 min en 0: salta, con sus etiquetas y su texto.
+      - eval_time: 5m
+        alertname: ServicioCaido
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: "https://app.paufer.es"
+            exp_annotations:
+              summary: "https://app.paufer.es no responde"
+              description: "La sonda a https://app.paufer.es falla desde hace más de 2 minutos."
+
+  # ---------------------------------------------------------------------------
+  # ServicioCaido NO debe saltar en un redeploy normal (~1 min de caída).
+  # Es la decisión de "for: 2m": sin ella llegaría un mensaje en cada despliegue
+  # y acabarías ignorándolos. Este test la demuestra en vez de afirmarla.
+  # ---------------------------------------------------------------------------
+  - interval: 30s
+    input_series:
+      # 3 muestras a 0 (algo menos de 2 min, ~1 min de caída real) y vuelve.
+      - series: 'probe_success{instance="https://app.paufer.es"}'
+        values: '1x4 0x2 1x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ServicioCaido
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: ServicioCaido
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ServicioCaido
+        exp_alerts: []
+
+  # ---------------------------------------------------------------------------
+  # CertificadoPorCaducar: caduca en < 14 días durante 1 hora.
+  # promtool simula el reloj desde 0: "time()" vale el eval_time, así que un
+  # caducado "en 864000 s" (10 días) tiene ~10 días restantes.
+  # ---------------------------------------------------------------------------
+  - interval: 30s
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{instance="https://api.paufer.es/health"}'
+        values: '864000x200'        # 10 días, constante
+      - series: 'probe_ssl_earliest_cert_expiry{instance="https://multas.paufer.es"}'
+        values: '2592000x200'       # 30 días, constante
+    alert_rule_test:
+      # Con 10 días restantes salta (tras la hora de "for")...
+      - eval_time: 1h30m
+        alertname: CertificadoPorCaducar
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: "https://api.paufer.es/health"
+            exp_annotations:
+              summary: "El certificado de https://api.paufer.es/health caduca en menos de 14 días"
+              description: "Quedan 10 días. Traefik debería haberlo renovado ya."
+      # ...y el de 30 días NO aparece: solo hay una alerta, la del primero.
+      # (El resultado anterior ya lo demuestra: exp_alerts lista TODAS.)
+
+  # ---------------------------------------------------------------------------
+  # ContenedorEnBucleDeReinicios: más de 2 arranques en 10 minutos.
+  # container_start_time_seconds cambia cada vez que el contenedor arranca.
+  # ---------------------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      # Bucle: la hora de arranque cambia en los minutos 2, 4 y 6.
+      - series: 'container_start_time_seconds{name="gaston-backend"}'
+        values: '1000 1000 1060 1060 1120 1120 1180 1180'
+      # Sano: la hora de arranque no cambia nunca.
+      - series: 'container_start_time_seconds{name="paufer-backend"}'
+        values: '1000x20'
+    alert_rule_test:
+      # En el minuto 5 van 2 arranques: justo en el límite ("> 2"), no salta.
+      # Comprueba que el umbral es estricto, no "mayor o igual".
+      - eval_time: 5m
+        alertname: ContenedorEnBucleDeReinicios
+        exp_alerts: []
+      # En el minuto 7 van 3: salta, solo para el contenedor que se reinicia.
+      - eval_time: 7m
+        alertname: ContenedorEnBucleDeReinicios
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              name: gaston-backend
+            exp_annotations:
+              summary: "El contenedor gaston-backend se reinicia en bucle"
+              description: "Más de 2 reinicios en los últimos 10 minutos."
+
+  # ---------------------------------------------------------------------------
+  # MemoriaDisponibleBaja: < 300 MB durante 5 minutos.
+  # ---------------------------------------------------------------------------
+  - interval: 30s
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '200000000x30'      # ~190 MB constante
+    alert_rule_test:
+      # Antes de cumplirse los 5 min del "for": no salta (ignora picos del solver).
+      - eval_time: 3m
+        alertname: MemoriaDisponibleBaja
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MemoriaDisponibleBaja
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Quedan menos de 300 MB de RAM disponible en el VPS"
+              description: "El VPS no tiene swap: al agotarse, el kernel empezará a matar procesos."
+
+  # Lo normal en el VPS (~1500 MB disponibles) no debe disparar nada.
+  - interval: 30s
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '1500000000x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MemoriaDisponibleBaja
+        exp_alerts: []

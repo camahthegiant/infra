@@ -1,0 +1,7 @@
+# Secretos y entorno local. Este repo no debe contener nunca un token.
+# El secret de producción vive en Coolify; en local se pasa por la terminal.
+# Si se usa un .env para pruebas, queda fuera de git gracias a estas líneas.
+.env
+.env.*
+*.key
+*.pem

@@ -1,0 +1,98 @@
+# Reglas de alerta: CUÁNDO hay un problema.
+#
+# Prometheus evalúa cada regla cada 30 s (evaluation_interval) sobre las
+# métricas que ya recoge. Si una condición se cumple durante el tiempo de
+# "for", la alerta pasa de "pending" a "firing" y se envía a Alertmanager, que
+# es quien decide a quién avisar y cómo (alertmanager/alertmanager.yml).
+#
+# Reparto de papeles: Prometheus decide CUÁNDO hay un problema; Alertmanager
+# decide QUÉ HACER con él (agrupar, no repetir, enrutar).
+#
+# Criterio para añadir reglas: cada alerta tiene que significar "haz algo".
+# Una alerta que salta a diario se acaba ignorando, y eso es peor que no
+# tenerla. Por eso empezamos con pocas, y las de CPU, disco y latencia se
+# añaden cuando haya datos reales del VPS y se sepa qué es "normal".
+#
+# Se valida con: promtool check rules alerts.yml
+
+groups:
+
+  # ---------------------------------------------------------------------------
+  # Disponibilidad: lo que ve un usuario (las sondas de blackbox).
+  # ---------------------------------------------------------------------------
+  - name: disponibilidad
+    rules:
+
+      # La sonda a una URL falla (HTTP no 2xx, timeout, TLS roto...).
+      # Es la alerta que habría avisado de la caída de Gast-On de septiembre.
+      - alert: ServicioCaido
+        expr: probe_success == 0
+        # La condición debe cumplirse 2 minutos seguidos. Un redeploy tira la
+        # app ~1 minuto y es normal: sin "for", llegaría un mensaje en cada
+        # despliegue y acabarías ignorándolos.
+        for: 2m
+        labels:
+          # Etiqueta para que Alertmanager pueda separar lo urgente de lo
+          # informativo más adelante. Hoy todo va al mismo sitio.
+          severity: critical
+        annotations:
+          # {{ $labels.instance }} se sustituye por la URL concreta afectada.
+          summary: "{{ $labels.instance }} no responde"
+          description: "La sonda a {{ $labels.instance }} falla desde hace más de 2 minutos."
+
+      # Un certificado a punto de caducar. Traefik renueva solo (Let's Encrypt)
+      # cuando quedan ~30 días; si a los 14 sigue sin renovar, es que algo falla
+      # en silencio, que es justo el tipo de fallo que nadie ve hasta que caduca.
+      - alert: CertificadoPorCaducar
+        # probe_ssl_earliest_cert_expiry es una fecha (segundos Unix). Se resta
+        # la hora actual y se divide entre 86400 (segundos por día) para tener
+        # días restantes.
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+        # Es una cuenta atrás lenta: no hace falta prisa, y 1 h evita avisar
+        # por un dato raro puntual.
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "El certificado de {{ $labels.instance }} caduca en menos de 14 días"
+          description: 'Quedan {{ $value | printf "%.0f" }} días. Traefik debería haberlo renovado ya.'
+
+  # ---------------------------------------------------------------------------
+  # Servidor y contenedores (node_exporter y cAdvisor).
+  # ---------------------------------------------------------------------------
+  - name: servidor
+    rules:
+
+      # Un contenedor arrancando una y otra vez: es el bucle de reinicios que
+      # tumbó Gast-On el 2026-09-25 (SQLAlchemy 2.1 -> alembic muere -> Coolify
+      # reinicia hasta agotar los intentos y lo mata).
+      - alert: ContenedorEnBucleDeReinicios
+        # container_start_time_seconds cambia cada vez que el contenedor
+        # arranca. "changes(...[10m]) > 2" = más de 2 arranques en 10 minutos.
+        # name!="" descarta los cgroups que no son contenedores.
+        # Un redeploy normal NO la dispara: Coolify crea contenedores con
+        # nombre nuevo (sufijo con marca de tiempo), que para esta regla son
+        # series distintas, no reinicios. A comprobar con un redeploy real.
+        expr: changes(container_start_time_seconds{name!=""}[10m]) > 2
+        # Sin "for": 3 arranques en 10 min ya es grave, no hay que esperar.
+        labels:
+          severity: critical
+        annotations:
+          summary: "El contenedor {{ $labels.name }} se reinicia en bucle"
+          description: "Más de 2 reinicios en los últimos 10 minutos."
+
+      # El VPS sin RAM disponible. No hay swap: cuando se agota, el kernel
+      # empieza a matar procesos (OOM kill), y no elige el que tú quieres.
+      - alert: MemoriaDisponibleBaja
+        # "Available" (no "free"): es la RAM realmente aprovechable, contando
+        # la caché que el kernel puede soltar. En uso normal el VPS tiene
+        # ~1500 MB; 300 MB está muy por debajo a propósito, para que solo salte
+        # ante algo anómalo. Se ajustará con datos reales.
+        expr: node_memory_MemAvailable_bytes < 300 * 1024 * 1024
+        # 5 min para ignorar los picos del solver al generar un horario.
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Quedan menos de 300 MB de RAM disponible en el VPS"
+          description: "El VPS no tiene swap: al agotarse, el kernel empezará a matar procesos."

@@ -18,6 +18,23 @@ global:
   # fija ya al mismo ritmo para que, cuando lleguen, se evalúen con cada lectura.
   evaluation_interval: 30s
 
+# Dónde están los ficheros de reglas de alerta (rutas DENTRO del contenedor;
+# el volumen se monta en docker-compose.yml). Sin esta sección Prometheus
+# ignora las reglas por completo y sin avisar. El comodín carga cualquier
+# .yml de la carpeta: para añadir reglas basta con un fichero nuevo.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# A quién entrega Prometheus las alertas cuando una regla salta. "alertmanager"
+# es el nombre del servicio en docker-compose.yml (red interna de Docker) y
+# 9093 su puerto de fábrica. Sin este bloque las reglas se evaluarían bien pero
+# nadie recibiría nada: Prometheus tendría las alertas y no sabría a quién
+# dárselas.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
 
   # Prometheus se mide a sí mismo. Sirve para saber cuánta memoria usa o

@@ -172,6 +172,9 @@ services:
       # La configuración vive en el repo (config-as-code): para cambiarla se
       # edita el fichero, se hace commit y se redespliega. En solo lectura.
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Carpeta entera, no un fichero: así una regla nueva (otro .yml) se
+      # carga sin tocar el compose. rule_files en prometheus.yml apunta aquí.
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       # Volumen con nombre: sin él, cada redeploy borraría todo el histórico
       # porque los datos vivirían dentro del contenedor, que se destruye al
       # recrearse. OJO: "docker compose down -v" lo borra.
@@ -185,5 +188,61 @@ services:
 
     # Sin "ports:": a Prometheus lo consulta Grafana por la red interna.
 
+  # ---------------------------------------------------------------------------
+  # alertmanager: recibe las alertas de Prometheus y decide QUÉ HACER con ellas:
+  # agrupar varias en un solo mensaje, no repetir de más y enviarlas a Telegram.
+  # Prometheus decide CUÁNDO hay un problema; este, cómo se avisa de él.
+  # Política en alertmanager/alertmanager.yml.
+  # ---------------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    restart: unless-stopped
+
+    # El token llega como variable de entorno (así lo guarda Coolify) pero
+    # alertmanager.yml lo lee de un FICHERO (bot_token_file). Esta envoltura
+    # convierte una cosa en la otra al arrancar: lo escribe en /tmp (dentro del
+    # contenedor, no persiste) y lanza Alertmanager.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        echo "$$TELEGRAM_BOT_TOKEN" > /tmp/telegram_token &&
+        exec /bin/alertmanager
+        --config.file=/etc/alertmanager/alertmanager.yml
+        --storage.path=/alertmanager
+    # Notas del comando (fáciles de equivocar):
+    #  - "$$" con doble dólar: un solo "$" lo resolvería Docker Compose ANTES de
+    #    arrancar y el token acabaría escrito dentro del comando, visible en
+    #    cada "docker inspect" y en los logs. Con "$$" llega literal al
+    #    contenedor y lo expande el sh de dentro.
+    #  - "exec": sustituye al shell por Alertmanager, que pasa a ser el proceso
+    #    principal. Sin él, "docker stop" mandaría la señal al shell, no a
+    #    Alertmanager, y tardaría 10 s en morir a la fuerza.
+
+    environment:
+      # Aquí sí un solo "$": queremos que el compose la lea de fuera (Coolify o
+      # tu terminal) y la pase al contenedor. NUNCA en el repo ni en un .env
+      # commiteado. El secret vive en Coolify.
+      #
+      # ":?" hace la variable OBLIGATORIA: si falta, el despliegue falla en ese
+      # momento con este mensaje. Sin ello, Docker Compose solo avisa y usa una
+      # cadena vacía: Alertmanager arrancaría "bien", se vería en verde, y no
+      # mandaría nunca un mensaje. Un sistema de alertas que falla en silencio
+      # es justo lo que NO debe pasar. El CI le pasa un valor ficticio, porque
+      # solo valida la estructura y no envía nada.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?falta el secret TELEGRAM_BOT_TOKEN}
+
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # Guarda los silencios y qué alertas ya se notificaron. Sin él, cada
+      # redeploy olvidaría lo avisado y recibirías de nuevo todo lo activo.
+      - alertmanager_data:/alertmanager
+
+    # Programa muy ligero: solo enruta mensajes.
+    mem_limit: 48m
+
+    # Escucha en el 9093 de fábrica. Sin "ports:": solo Prometheus le habla,
+    # por la red interna.
+
 volumes:
   prometheus_data:
+  alertmanager_data:

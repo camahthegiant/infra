@@ -1,0 +1,64 @@
+# Política de avisos de Alertmanager: QUÉ HACER con una alerta.
+#
+# Prometheus decide CUÁNDO hay un problema (prometheus/rules/alerts.yml).
+# Alertmanager decide a quién avisar, cómo agrupar varios avisos, cuánto
+# esperar y cada cuánto repetir. Es un programa aparte a propósito: cuando algo
+# grave cae, a menudo caen cinco cosas a la vez (el VPS sin RAM tumba tres
+# apps). Sin un intermediario llegarían quince mensajes; aquí llega uno.
+#
+# EL TOKEN DEL BOT NO ESTÁ AQUÍ y no debe estarlo nunca: este fichero va al
+# repo. Se lee de un fichero (bot_token_file) que el compose escribe al
+# arrancar a partir de la variable TELEGRAM_BOT_TOKEN (secret de Coolify).
+#
+# Se valida con: amtool check-config alertmanager.yml
+
+global:
+  # Si una alerta deja de llegar, tras este tiempo se da por resuelta aunque
+  # Prometheus no lo diga explícitamente. Es el valor por defecto; se deja
+  # escrito para que se vea.
+  resolve_timeout: 5m
+
+route:
+  # Destino por defecto. De momento todo va a Telegram; cuando haga falta
+  # separar lo crítico de lo informativo se añaden rutas hijas usando la
+  # etiqueta "severity" que ya llevan las reglas.
+  receiver: telegram
+
+  # Las alertas con el mismo nombre y la misma URL/contenedor se agrupan en UN
+  # solo mensaje. Sin esto, llegaría un mensaje por cada alerta suelta.
+  group_by: [alertname, instance]
+
+  # Al llegar la primera alerta de un grupo, espera 30 s por si llegan más y
+  # las junta. Equilibrio: cuanto más agrupas, menos ruido y más tarde te
+  # enteras. 30 s es irrelevante para tres apps y se agradece en una caída
+  # general (un mensaje en vez de ocho).
+  group_wait: 30s
+
+  # Si el grupo cambia (se suma una alerta nueva), espera 5 min antes de
+  # avisar del cambio, para no mandar un mensaje por cada alerta que se añada.
+  group_interval: 5m
+
+  # Si el problema SIGUE, se recuerda cada 4 h. Menos que eso sería agobiar y
+  # acabarías silenciándolo; más, y un problema olvidado dura días. Es el
+  # valor por defecto; se fija explícito para que quede escrito el porqué.
+  repeat_interval: 4h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      # Lee el token de un fichero, no lo lleva escrito. El compose lo crea en
+      # /tmp al arrancar el contenedor (no persiste) desde la variable de
+      # entorno TELEGRAM_BOT_TOKEN.
+      - bot_token_file: /tmp/telegram_token
+
+        # Identifica TU conversación con el bot. No es un secreto en sentido
+        # fuerte (sin el token nadie puede escribirte) y el repo es privado.
+        chat_id: 1258958726
+
+        # Manda un segundo mensaje cuando el problema desaparece. Sin esto
+        # nunca sabrías si algo se arregló solo: te quedarías mirando una
+        # alerta vieja.
+        send_resolved: true
+
+        # Permite negritas y saltos de línea en el mensaje.
+        parse_mode: HTML
