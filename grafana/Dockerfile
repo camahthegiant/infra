@@ -19,7 +19,22 @@ COPY provisioning/ /etc/grafana/provisioning/
 # provisioning/dashboards/dashboards.yml y con
 # GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH del compose; si no, Grafana busca en
 # una carpeta vacía y no dice nada.
-COPY dashboards/ /var/lib/grafana/dashboards/
+#
+# POR QUÉ /etc/grafana/dashboards Y NO /var/lib/grafana/dashboards
+#   /var/lib/grafana es donde el compose monta el volumen grafana_data (la base
+#   de datos de Grafana). Un volumen con nombre TAPA lo que la imagen tenga en
+#   esa ruta, y Docker solo copia el contenido de la imagen al volumen UNA vez,
+#   al crearlo vacío. Con la portada ahí:
+#     - en un volumen ya existente (cualquier redeploy; el de producción venía
+#       de un primer intento fallido) la carpeta Infraestructura salía VACÍA;
+#     - y aunque el volumen fuera nuevo, una portada nueva en una imagen
+#       posterior nunca llegaría: el volumen conservaría la copia congelada.
+#   Pasó el 2026-10-15; las pruebas locales no lo veían porque siempre
+#   empezaban con un volumen vacío (down -v).
+#   REGLA: el volumen guarda lo que Grafana ESCRIBE; lo que nosotros le DAMOS va
+#   en la imagen, en una ruta que ningún volumen pise.
+#   La comprueba scripts/check-no-shadowed-config.sh.
+COPY dashboards/ /etc/grafana/dashboards/
 
 # Grafana corre como el usuario 472 (heredado de la imagen). Los ficheros
 # copiados quedan como root con permisos 644/755: legibles para él, no hace

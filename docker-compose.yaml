@@ -322,7 +322,10 @@ services:
       # por grafana/tools/gen_vps_dashboard.py) en vez de su página de
       # bienvenida. La ruta es la del contenedor: la misma carpeta a la que
       # copia los dashboards grafana/Dockerfile.
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/vps.json
+      # OJO: /etc/grafana/dashboards y no /var/lib/grafana/dashboards. Bajo
+      # /var/lib/grafana se monta el volumen grafana_data, que taparía la
+      # portada de la imagen (ver el comentario del COPY en grafana/Dockerfile).
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/vps.json
 
       # Tema oscuro por defecto: es el que mejor hace destacar el rojo y el
       # verde de los estados, que es el único color con significado aquí. Cada
@@ -332,6 +335,8 @@ services:
     volumes:
       # Su base de datos (SQLite): usuarios y preferencias. Sin él, cada
       # redeploy te devolvería a cero.
+      # SOLO lo que Grafana ESCRIBE va aquí. Nada de lo que le damos (provisioning,
+      # dashboards) puede estar bajo /var/lib/grafana: este volumen lo taparía.
       - grafana_data:/var/lib/grafana
       # El provisioning y los dashboards ya NO se montan: van dentro de la
       # imagen (grafana/Dockerfile). Lo que se cambie a mano en la interfaz se

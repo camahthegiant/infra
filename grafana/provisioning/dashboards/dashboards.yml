@@ -40,7 +40,10 @@ providers:
 
     options:
       # Carpeta DENTRO DEL CONTENEDOR. Tiene que coincidir letra por letra con
-      # el segundo volumen del servicio grafana en docker-compose.yaml:
-      #   ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # el COPY de grafana/Dockerfile y con
+      # GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH de docker-compose.yaml.
       # Si no coincide, Grafana busca en una carpeta vacía y no dice nada.
-      path: /var/lib/grafana/dashboards
+      #
+      # NO puede estar bajo /var/lib/grafana: ahí se monta el volumen de datos
+      # y taparía los dashboards de la imagen (ver el comentario del COPY).
+      path: /etc/grafana/dashboards
