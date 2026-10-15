@@ -1,0 +1,9 @@
+# Qué NO entra en el contexto de construcción de esta imagen.
+#
+# tools/ es el generador de la portada (gen_vps_dashboard.py): se ejecuta en el
+# desarrollo para producir dashboards/vps.json, no tiene sitio en la imagen.
+tools/
+
+# La receta no necesita viajar dentro del contexto.
+Dockerfile
+.dockerignore

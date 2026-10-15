@@ -1,0 +1,10 @@
+# Qué NO entra en el contexto de construcción de esta imagen.
+#
+# tests/ son los tests unitarios de las reglas (los ejecuta promtool o el CI).
+# No tienen sitio en la imagen y, además, Prometheus cargaría cualquier .yml
+# que estuviera en la carpeta de reglas.
+tests/
+
+# La receta no necesita viajar dentro del contexto.
+Dockerfile
+.dockerignore
