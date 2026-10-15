@@ -60,6 +60,22 @@ Consecuencias: cambiar la configuración exige **reconstruir y redesplegar** (ya
 reiniciar), y en local se arranca con `up -d --build`. A cambio, lo que corre en producción es
 exactamente lo que hay en un commit.
 
+### Regla: nada horneado bajo la ruta de un volumen
+
+El volumen guarda lo que el programa **escribe**; lo que nosotros le **damos** va en la imagen,
+en una ruta que ningún volumen pise. Un volumen con nombre *tapa* lo que la imagen tenga en esa
+ruta, y Docker solo copia la imagen al volumen **una vez, al crearlo vacío**.
+
+Incidente (2026-10-15, segundo despliegue): la portada de Grafana se copiaba a
+`/var/lib/grafana/dashboards`, y ahí se monta `grafana_data`. En producción el volumen ya existía
+(con `grafana.db`) y la carpeta *Infraestructura* salió **vacía**. En local no se veía porque
+las pruebas empezaban siempre con el volumen vacío (`down -v`). Además, aunque el volumen hubiera
+sido nuevo, una portada posterior nunca habría llegado: el volumen conservaría la copia congelada.
+
+Ahora la portada vive en `/etc/grafana/dashboards`. Lo detecta
+`scripts/check-no-shadowed-config.sh`, que monta un volumen **ya poblado** y comprueba que la
+ruta que lee el provider sigue conteniendo la portada.
+
 ## Cómo funciona
 
 ```
@@ -231,6 +247,12 @@ docker run --rm --entrypoint sh infra-alertmanager:ci -c \
 docker build -q -t infra-blackbox:ci blackbox
 docker run --rm infra-blackbox:ci \
   --config.check --config.file=/etc/blackbox/blackbox.yml
+```
+
+```bash
+# Que la configuración horneada SOBREVIVE a un volumen que ya existía (caso real de
+# cada redeploy). Falla si algo vuelve a quedar bajo la ruta de un volumen.
+scripts/check-no-shadowed-config.sh
 ```
 
 Los tests son equivalentes a `pytest` para la monitorización. Se comprobó que tienen dientes:
