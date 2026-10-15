@@ -17,8 +17,8 @@ Hoy contiene la **monitorización**: saber qué está caído o saturado antes de
 ## Estructura
 
 ```
-docker-compose.yml          # los servicios; es lo que despliega Coolify
-docker-compose.local.yml    # solo para probar en local (9090, 9093 y 3000 en 127.0.0.1)
+docker-compose.yaml          # los servicios; es lo que despliega Coolify
+docker-compose.local.yaml    # solo para probar en local (9090, 9093 y 3000 en 127.0.0.1)
 alertmanager/
 ├── Dockerfile              # FROM versión fijada + COPY de la configuración
 └── alertmanager.yml        # política de avisos: agrupar, repetir, a quién (Telegram)
@@ -186,11 +186,11 @@ En producción son secrets de Coolify; en local se pasan por la terminal y desap
 read -s -x TELEGRAM_BOT_TOKEN
 read -s -x GRAFANA_ADMIN_PASSWORD       # en local, una desechable: NO la de producción
 # --build es obligatorio tras cambiar configuración: va dentro de la imagen
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+docker compose -f docker-compose.yaml -f docker-compose.local.yaml up -d --build
 # http://localhost:9090/targets  -> todos en UP
 # http://localhost:9090/alerts   -> las 4 reglas, en inactive
 # http://localhost:3000          -> Grafana, carpeta Infraestructura > "VPS: visión general"
-docker compose -f docker-compose.yml -f docker-compose.local.yml down -v   # -v: borra los volúmenes locales
+docker compose -f docker-compose.yaml -f docker-compose.local.yaml down -v   # -v: borra los volúmenes locales
 ```
 
 `down -v` es correcto en local (los datos son de usar y tirar y es lo único que fuerza a Grafana
@@ -255,7 +255,7 @@ sabotear una regla (quitar el `for`, subir un umbral) los hace fallar.
   preinstalación de plugins. Menos memoria y ningún tráfico saliente al arrancar.
 - **Medir antes de fijar un tope.** Mi estimación de memoria de Grafana (100-150 MB) falló con la
   13 en un factor 2-3: por eso cada `mem_limit` lleva su medida en un comentario.
-- **`docker-compose.local.yml` aparte.** Para no tocar el de producción y que no se pueda
+- **`docker-compose.local.yaml` aparte.** Para no tocar el de producción y que no se pueda
   publicar Prometheus en el VPS por un descuido.
 
 ## Avisos
@@ -298,11 +298,11 @@ Currently holds the **monitoring stack**: Prometheus scraping node_exporter (hos
 - Image versions are pinned (never `latest`) and every service has a `mem_limit` — the VPS has
   4 GB and no swap.
 - No `ports:` in production: containers talk over the compose network by service name.
-  `docker-compose.local.yml` publishes Prometheus on `127.0.0.1:9090` for local testing only.
+  `docker-compose.local.yaml` publishes Prometheus on `127.0.0.1:9090` for local testing only.
 - Secrets live in Coolify, never in this repo. `docker compose down -v` wipes the metrics volume.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+docker compose -f docker-compose.yaml -f docker-compose.local.yaml up -d --build
 ```
 
 Configuration is **baked into the images** (one Dockerfile per service): a Coolify Docker

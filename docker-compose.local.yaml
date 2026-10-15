@@ -1,6 +1,6 @@
 # SOLO PARA PROBAR EN LOCAL. No se despliega nunca.
 #
-# El docker-compose.yml de producción no publica ningún puerto a propósito:
+# El docker-compose.yaml de producción no publica ningún puerto a propósito:
 # nada de Prometheus debe poder alcanzarse desde fuera del servidor. Pero para
 # probarlo en tu máquina hace falta ver su interfaz en el navegador.
 #
@@ -11,9 +11,9 @@
 # Uso (los dos ficheros, explícitos; no se llama "override" a propósito para
 # que Docker no lo cargue por su cuenta sin que se vea):
 #
-#   docker compose -f docker-compose.yml -f docker-compose.local.yml up
+#   docker compose -f docker-compose.yaml -f docker-compose.local.yaml up
 #
-# Coolify usa solo docker-compose.yml, por lo que este fichero no le afecta.
+# Coolify usa solo docker-compose.yaml, por lo que este fichero no le afecta.
 
 services:
   prometheus:
@@ -35,7 +35,7 @@ services:
   #  - ROOT_URL apunta a localhost (si no, los enlaces irían a grafana.paufer.es);
   #  - cookie_secure=false: una cookie "Secure" solo viaja por HTTPS y sin esto
   #    no se podría iniciar sesión en http://localhost:3000.
-  # Estas tres cosas NO deben llegar nunca al docker-compose.yml de producción.
+  # Estas tres cosas NO deben llegar nunca al docker-compose.yaml de producción.
   grafana:
     ports:
       - "127.0.0.1:3000:3000"

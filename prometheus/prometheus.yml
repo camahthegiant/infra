@@ -4,7 +4,7 @@
 # medir nada. Es lo que convierte "tengo un servidor de métricas" en "mido
 # estas cosas".
 #
-# Se monta en el contenedor desde docker-compose.yml (en solo lectura).
+# Se monta en el contenedor desde docker-compose.yaml (en solo lectura).
 # Se valida con: promtool check config prometheus.yml (lo hará el CI).
 
 global:
@@ -19,14 +19,14 @@ global:
   evaluation_interval: 30s
 
 # Dónde están los ficheros de reglas de alerta (rutas DENTRO del contenedor;
-# el volumen se monta en docker-compose.yml). Sin esta sección Prometheus
+# el volumen se monta en docker-compose.yaml). Sin esta sección Prometheus
 # ignora las reglas por completo y sin avisar. El comodín carga cualquier
 # .yml de la carpeta: para añadir reglas basta con un fichero nuevo.
 rule_files:
   - /etc/prometheus/rules/*.yml
 
 # A quién entrega Prometheus las alertas cuando una regla salta. "alertmanager"
-# es el nombre del servicio en docker-compose.yml (red interna de Docker) y
+# es el nombre del servicio en docker-compose.yaml (red interna de Docker) y
 # 9093 su puerto de fábrica. Sin este bloque las reglas se evaluarían bien pero
 # nadie recibiría nada: Prometheus tendría las alertas y no sabría a quién
 # dárselas.
@@ -44,7 +44,7 @@ scrape_configs:
       - targets: ["localhost:9090"]
 
   # El servidor (CPU, RAM, disco, load). "node_exporter" NO es una IP: es el
-  # nombre del servicio en docker-compose.yml. Docker crea una red interna
+  # nombre del servicio en docker-compose.yaml. Docker crea una red interna
   # donde cada servicio se encuentra por su nombre; si se renombra el servicio
   # en el compose hay que renombrarlo aquí, o Prometheus dejará de encontrarlo.
   # 9100 es el puerto en el que escucha node_exporter de fábrica (EXPOSE de la

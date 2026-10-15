@@ -290,7 +290,7 @@ services:
       GF_SERVER_ROOT_URL: https://grafana.paufer.es
 
       # La cookie de sesión solo viaja por HTTPS: no se puede robar en una
-      # conexión sin cifrar. En local se desactiva (ver docker-compose.local.yml).
+      # conexión sin cifrar. En local se desactiva (ver docker-compose.local.yaml).
       GF_SECURITY_COOKIE_SECURE: "true"
 
       # Sin telemetría ni comprobación de actualizaciones: tráfico saliente

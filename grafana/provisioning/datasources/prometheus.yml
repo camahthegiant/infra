@@ -30,7 +30,7 @@ datasources:
     # habría que publicarlo.
     access: proxy
 
-    # Nombre del servicio en docker-compose.yml y su puerto de fábrica, como en
+    # Nombre del servicio en docker-compose.yaml y su puerto de fábrica, como en
     # prometheus.yml. Funciona por la red interna de Docker.
     url: http://prometheus:9090
 

@@ -40,7 +40,7 @@ providers:
 
     options:
       # Carpeta DENTRO DEL CONTENEDOR. Tiene que coincidir letra por letra con
-      # el segundo volumen del servicio grafana en docker-compose.yml:
+      # el segundo volumen del servicio grafana en docker-compose.yaml:
       #   ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       # Si no coincide, Grafana busca en una carpeta vacía y no dice nada.
       path: /var/lib/grafana/dashboards

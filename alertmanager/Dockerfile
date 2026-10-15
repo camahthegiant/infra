@@ -14,5 +14,5 @@ FROM prom/alertmanager:v0.34.1
 # subir a un registro o inspeccionar. alertmanager.yml solo dice "léelo de
 # /tmp/telegram_token"; el compose escribe ese fichero al ARRANCAR el
 # contenedor, a partir de la variable TELEGRAM_BOT_TOKEN (secret de Coolify).
-# Por eso el entrypoint de ese arranque sigue en docker-compose.yml y no aquí.
+# Por eso el entrypoint de ese arranque sigue en docker-compose.yaml y no aquí.
 COPY alertmanager.yml /etc/alertmanager/alertmanager.yml

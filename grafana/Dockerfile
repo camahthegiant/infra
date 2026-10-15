@@ -8,7 +8,7 @@
 
 # Versión FIJADA, nunca "latest". Serie 12.4 a propósito y no la 13: medido con
 # la misma configuración y carga, la 13.2.4 pesaba 300-320 MB (pegada al tope
-# del contenedor) y la 12.4.13 114-118 MB, estable. Ver docker-compose.yml.
+# del contenedor) y la 12.4.13 114-118 MB, estable. Ver docker-compose.yaml.
 FROM grafana/grafana:12.4.13
 
 # De dónde lee datos (datasource Prometheus, uid fijo "prometheus") y en qué
