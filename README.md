@@ -246,6 +246,9 @@ sabotear una regla (quitar el `for`, subir un umbral) los hace fallar.
   Docker a través del socket: es un riesgo conocido y aceptado (imagen oficial, versión fijada,
   sin exponer). **Nunca publicar su puerto.**
 - Los secretos (token del bot de Telegram, contraseña de Grafana) viven en Coolify, nunca en este repo.
+- **Antes de hacer público este repo:** `alertmanager/alertmanager.yml` lleva el `chat_id` de
+  Telegram en claro (sin el token nadie puede escribir con él, pero es un dato personal), y
+  `prometheus.yml` y el compose los subdominios reales. Sacar el `chat_id` a una variable.
 
 ## Medido (local, ~2 min tras arrancar, 5-9 contenedores en el host)
 
