@@ -106,6 +106,40 @@ services:
     # Sin "ports:" a propósito, igual que node_exporter.
 
   # ---------------------------------------------------------------------------
+  # blackbox_exporter: comprueba las URLs públicas POR FUERA, como un usuario.
+  # A diferencia de node_exporter y cAdvisor (que miran por dentro y NO pueden
+  # saber si un usuario recibe un 503), este hace la petición completa y
+  # cubre todo el camino: DNS, TLS, Traefik y la aplicación.
+  # Prometheus no le pregunta "¿cómo estás?" sino "comprueba ESTA URL por mí":
+  # la URL viaja como parámetro (ver prometheus.yml, job blackbox).
+  #
+  # Limitaciones conocidas, porque corre en el propio VPS:
+  #   - Si el VPS entero cae, cae con él (y Prometheus y Alertmanager).
+  #   - No prueba que el servidor sea alcanzable desde internet.
+  #   Se cubren con un chequeo externo gratuito (UptimeRobot o similar).
+  # ---------------------------------------------------------------------------
+  blackbox_exporter:
+    # Fijada a la misma versión con la que se validó blackbox.yml
+    # (--config.check). Validar con una y desplegar otra anularía la prueba.
+    image: prom/blackbox-exporter:v0.29.0
+    restart: unless-stopped
+
+    # Sin esta línea usaría los módulos por defecto de la imagen y nuestro
+    # blackbox.yml se ignoraría en silencio.
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+
+    # Solo hace peticiones HTTP y devuelve un resultado: muy ligero.
+    mem_limit: 32m
+
+    # Escucha en el 9115 de fábrica. Sin "ports:": solo Prometheus llega a él,
+    # por la red interna. Sin "depends_on": si arranca antes que blackbox, ese
+    # objetivo sale caído unos segundos y se recupera solo.
+
+  # ---------------------------------------------------------------------------
   # prometheus: el cerebro. Cada 30 s visita a cada exportador, lee sus números
   # y los guarda con la hora (modelo "pull": va él a por los datos, los
   # exportadores no necesitan saber que existe, y por eso no hace falta abrir

@@ -1,0 +1,50 @@
+# Recetas de comprobación ("módulos") de blackbox_exporter.
+#
+# Blackbox mira POR FUERA, como lo haría un usuario: pide la URL pública y
+# comprueba qué le contestan. Es lo único que cubre todo el camino (DNS, TLS,
+# Traefik, aplicación). node_exporter y cAdvisor miran por dentro y no pueden
+# decir si un usuario recibe un 503.
+#
+# Cada módulo describe CÓMO se hace una prueba y qué cuenta como éxito.
+# Prometheus elige el módulo con el parámetro "module" (ver prometheus.yml).
+#
+# La imagen ya trae módulos por defecto y funcionaría sin este fichero. Se
+# escribe a propósito para decidir nosotros cada valor y dejar escrito el porqué.
+#
+# Se valida con: blackbox_exporter --config.check --config.file=blackbox.yml
+
+modules:
+
+  # "Una petición HTTP que debe devolver 2xx". Nombre por convención.
+  http_2xx:
+    prober: http
+
+    # Cuánto espera antes de dar la sonda por fallida. Tiene que ser MENOR que
+    # el intervalo de Prometheus (30 s) para que una sonda lenta no se solape
+    # con la siguiente. Las apps responden en milisegundos: algo que tarde 10 s
+    # es, a efectos prácticos, una caída.
+    timeout: 10s
+
+    http:
+      # GET: la petición más inocua, solo pide la página, no cambia nada.
+      method: GET
+
+      # Imprescindible en este caso: app.paufer.es responde con un 307
+      # (redirección). Sin seguirla, la sonda vería "no es un 200" y daría una
+      # falsa alarma permanente. Siguiéndola, comprueba la página final.
+      follow_redirects: true
+
+      # Falla si la URL no es HTTPS. Red de seguridad: si alguien cambia una
+      # URL a http:// por error, nos enteramos. Todas las nuestras son HTTPS.
+      fail_if_not_ssl: true
+
+      # Por defecto blackbox prueba IPv6 primero. En un VPS sin ruta IPv6 eso
+      # añade retraso o un fallo falso mientras reintenta. IPv4 lo hace
+      # predecible.
+      preferred_ip_protocol: ip4
+
+      # No se escribe "valid_status_codes": por defecto cuenta como éxito
+      # cualquier 2xx, que es exactamente lo que queremos.
+      #
+      # Con HTTPS, blackbox también publica cuándo caduca el certificado
+      # (probe_ssl_earliest_cert_expiry): alimentará la alerta de caducidad.

@@ -40,3 +40,52 @@ scrape_configs:
   - job_name: cadvisor
     static_configs:
       - targets: ["cadvisor:8080"]
+
+  # Sondas HTTP: comprueba las URLs públicas por fuera, como un usuario.
+  # Es distinto de los jobs anteriores. Allí Prometheus preguntaba a un
+  # exportador "¿cómo estás?"; aquí le pide a blackbox "comprueba ESTA URL por
+  # mí" y la URL viaja como parámetro de la petición.
+  #
+  # Dos URLs por app: la web (frontend) y el endpoint de salud del backend.
+  # Una app nueva NO se vigila sola: hay que añadir sus URLs aquí. Es a
+  # propósito, para decidir qué merece alerta (cAdvisor sí descubre
+  # contenedores nuevos automáticamente; esto no).
+  - job_name: blackbox
+    # En vez de /metrics (lo normal) pide /probe, el punto de blackbox que
+    # ejecuta una comprobación.
+    metrics_path: /probe
+    params:
+      # La "receta" de blackbox/blackbox.yml. Se añade como ?module=http_2xx
+      module: [http_2xx]
+
+    static_configs:
+      # OJO: aquí "targets" NO son sitios a los que preguntar sino las URLs
+      # que queremos VIGILAR. A quién se pregunta de verdad lo decide el
+      # relabel_configs de abajo.
+      - targets:
+          - https://app.paufer.es
+          - https://api.paufer.es/health
+          - https://gaston.paufer.es
+          - https://api-gaston.paufer.es/health
+          - https://multas.paufer.es
+          # Multas enruta /api al backend con Traefik, por eso cuelga del
+          # mismo dominio y su endpoint de salud se llama /api/v1/salud.
+          - https://multas.paufer.es/api/v1/salud
+
+    # Tres reglas, aplicadas en este ORDEN a cada URL. Los nombres con "__"
+    # son campos internos que solo existen mientras Prometheus prepara la
+    # petición. Resultado, p. ej. para app.paufer.es:
+    #   GET http://blackbox_exporter:9115/probe?module=http_2xx&target=https://app.paufer.es
+    relabel_configs:
+      # 1. Copia la URL al parámetro "target" de la petición.
+      - source_labels: [__address__]
+        target_label: __param_target
+      # 2. Etiqueta la métrica con la URL, para ver en Grafana
+      #    "https://app.paufer.es" y no "blackbox_exporter:9115".
+      - source_labels: [__param_target]
+        target_label: instance
+      # 3. Cambia a QUIÉN se contacta de verdad: blackbox, no la web. Va
+      #    después de la 1 a propósito: si fuera antes, la regla 1 copiaría
+      #    "blackbox_exporter:9115" como target y la URL se perdería.
+      - target_label: __address__
+        replacement: blackbox_exporter:9115

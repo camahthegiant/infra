@@ -8,7 +8,7 @@ Hoy contiene la **monitorización**: saber qué está caído o saturado antes de
 | Fase | Qué | Estado |
 |---|---|---|
 | 1 | Métricas del servidor y de los contenedores (node_exporter, cAdvisor) + Prometheus | hecha, probada en local |
-| 2 | Sondas HTTP a las URLs públicas y caducidad de certificados (blackbox) | pendiente |
+| 2 | Sondas HTTP a las URLs públicas y caducidad de certificados (blackbox) | hecha, probada en local (6/6 URLs OK) |
 | 3 | Alertas a Telegram (Alertmanager) | pendiente |
 | 4 | Grafana con dashboards, tras Traefik | pendiente |
 
@@ -18,6 +18,8 @@ Hoy contiene la **monitorización**: saber qué está caído o saturado antes de
 monitoring/
 ├── docker-compose.yml          # los servicios; es lo que despliega Coolify
 ├── docker-compose.local.yml    # solo para probar en local (publica el 9090)
+├── blackbox/
+│   └── blackbox.yml            # "recetas" de comprobación (qué cuenta como éxito)
 └── prometheus/
     └── prometheus.yml          # a quién pregunta Prometheus y cada cuánto
 ```
@@ -29,11 +31,33 @@ node_exporter ──┐
  (el servidor)  │
 cadvisor ───────┼──►  prometheus  ──►  (grafana, alertmanager: fases 3-4)
  (contenedores) │     guarda y evalúa
+blackbox ───────┘
+ (URLs, por fuera)
 ```
 
 Prometheus **pregunta** cada 30 s a cada exportador y guarda las respuestas con la hora
 (modelo *pull*). Los exportadores no necesitan saber que existe, y por eso no hace falta
 publicar ningún puerto.
+
+### Qué ve cada pieza
+
+| Pieza | Mira | Configuración por app |
+|---|---|---|
+| node_exporter | El servidor entero (por dentro) | ninguna |
+| cAdvisor | Todos los contenedores Docker (por dentro) | ninguna: descubre los nuevos solo |
+| blackbox | Las URLs públicas, como un usuario (por fuera) | una línea por URL en `prometheus.yml` |
+
+Blackbox es la única que detecta lo que ve el usuario (un 503, un certificado caducado, Traefik
+mal enrutado); cAdvisor y node_exporter no pueden saber eso. Por eso hacen falta las tres.
+
+### URLs vigiladas
+
+Dos por app (la web y el endpoint de salud del backend): Paufer, Gast-On y Multas. Una app
+nueva **no** se vigila sola: hay que añadirla en `prometheus/prometheus.yml`, job `blackbox`.
+
+**Limitación:** blackbox corre en el propio VPS. Si el VPS entero cae, cae con él (y con
+Prometheus y Alertmanager), y no prueba que el servidor sea alcanzable desde internet. Se cubre
+con un chequeo externo gratuito (UptimeRobot o similar); pendiente.
 
 ## Probar en local
 
