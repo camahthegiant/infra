@@ -11,38 +11,54 @@ Hoy contiene la **monitorización**: saber qué está caído o saturado antes de
 | 2 | Sondas HTTP a las URLs públicas y caducidad de certificados (blackbox) | hecha, probada en local (6/6 URLs OK) |
 | 3 | Reglas de alerta y avisos a Telegram (Alertmanager) | hecha: envío real y ciclo firing/resolved probados; reglas con tests unitarios |
 | 4 | Grafana con dashboard provisionado, tras Traefik | hecha, probada en local (7/7 paneles con datos) |
-| 5 | Despliegue en Coolify y medida real de RAM en el VPS | pendiente |
+| 5 | Despliegue en Coolify y medida real de RAM en el VPS | en curso: el primer intento falló (bind mounts) y se corrigió horneando la configuración en las imágenes |
 | 6 | CI de este repo (los comandos de "Validar sin arrancar nada") | pendiente |
 
 ## Estructura
 
 ```
-monitoring/
-├── docker-compose.yml          # los servicios; es lo que despliega Coolify
-├── docker-compose.local.yml    # solo para probar en local (9090, 9093 y 3000 en 127.0.0.1)
-├── alertmanager/
-│   └── alertmanager.yml        # política de avisos: agrupar, repetir, a quién (Telegram)
-├── blackbox/
-│   └── blackbox.yml            # "recetas" de comprobación (qué cuenta como éxito)
-├── grafana/
-│   ├── provisioning/
-│   │   ├── datasources/prometheus.yml   # de dónde lee datos (uid fijo: "prometheus")
-│   │   └── dashboards/dashboards.yml    # en qué carpeta busca dashboards
-│   ├── dashboards/
-│   │   └── vps.json            # la portada (GENERADO; JSON no admite comentarios: el porqué
-│   │                           #   está en el campo "description" de cada panel)
-│   └── tools/
-│       └── gen_vps_dashboard.py  # fuente real de vps.json, comentada. Editar aquí y regenerar
-└── prometheus/
-    ├── prometheus.yml          # a quién pregunta Prometheus y cada cuánto
-    ├── rules/
-    │   └── alerts.yml          # CUÁNDO hay un problema (lo carga Prometheus)
-    └── tests/
-        └── alerts_test.yml     # tests unitarios de las reglas (solo los ejecuta promtool/CI)
+docker-compose.yml          # los servicios; es lo que despliega Coolify
+docker-compose.local.yml    # solo para probar en local (9090, 9093 y 3000 en 127.0.0.1)
+alertmanager/
+├── Dockerfile              # FROM versión fijada + COPY de la configuración
+└── alertmanager.yml        # política de avisos: agrupar, repetir, a quién (Telegram)
+blackbox/
+├── Dockerfile
+└── blackbox.yml            # "recetas" de comprobación (qué cuenta como éxito)
+grafana/
+├── Dockerfile
+├── provisioning/
+│   ├── datasources/prometheus.yml   # de dónde lee datos (uid fijo: "prometheus")
+│   └── dashboards/dashboards.yml    # en qué carpeta busca dashboards
+├── dashboards/
+│   └── vps.json            # la portada (GENERADO; JSON no admite comentarios: el porqué
+│                           #   está en el campo "description" de cada panel)
+└── tools/
+    └── gen_vps_dashboard.py  # fuente real de vps.json, comentada. Editar aquí y regenerar
+prometheus/
+├── Dockerfile
+├── prometheus.yml          # a quién pregunta Prometheus y cada cuánto
+├── rules/
+│   └── alerts.yml          # CUÁNDO hay un problema (va dentro de la imagen)
+└── tests/
+    └── alerts_test.yml     # tests unitarios de las reglas (solo promtool/CI; NO entra en la imagen)
 ```
 
 `tests/` está fuera de `rules/` a propósito: Prometheus carga todo `rules/*.yml` y tomaría el
-fichero de test por reglas. Los tests ni siquiera se montan en el servidor.
+fichero de test por reglas. Los `.dockerignore` lo dejan fuera de la imagen, igual que `tools/`.
+
+### Por qué cada servicio lleva su Dockerfile
+
+La configuración **va dentro de la imagen** y no se monta. Medido en el primer despliegue
+(2026-10-15): un recurso Docker Compose de Coolify **no deja el repo en la ruta desde la que se
+montan los volúmenes**. En el servidor solo había el compose y el `.env` generados por Coolify y
+carpetas vacías, y `alertmanager.yml` era un *directorio* (Docker lo crea cuando el origen del
+montaje no existe). `build:` sí usa el clon del repo, y por eso funciona (es lo que ya usan
+Gast-On y Multas).
+
+Consecuencias: cambiar la configuración exige **reconstruir y redesplegar** (ya no basta con
+reiniciar), y en local se arranca con `up -d --build`. A cambio, lo que corre en producción es
+exactamente lo que hay en un commit.
 
 ## Cómo funciona
 
@@ -105,7 +121,7 @@ Todo es código: datasource y dashboard se cargan desde `grafana/` en solo lectu
 cambie a mano en la interfaz **se pierde** al reiniciar. El dashboard se **genera**:
 
 ```bash
-python3 monitoring/grafana/tools/gen_vps_dashboard.py   # reescribe grafana/dashboards/vps.json
+python3 grafana/tools/gen_vps_dashboard.py   # reescribe grafana/dashboards/vps.json
 ```
 
 Para cambiar un color, un umbral o una consulta se edita el script (cada decisión de diseño
@@ -167,10 +183,10 @@ En producción son secrets de Coolify; en local se pasan por la terminal y desap
 
 ```fish
 # Los secretos pasan por tu teclado, nunca por un fichero ni por el historial
-cd monitoring
 read -s -x TELEGRAM_BOT_TOKEN
 read -s -x GRAFANA_ADMIN_PASSWORD       # en local, una desechable: NO la de producción
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+# --build es obligatorio tras cambiar configuración: va dentro de la imagen
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 # http://localhost:9090/targets  -> todos en UP
 # http://localhost:9090/alerts   -> las 4 reglas, en inactive
 # http://localhost:3000          -> Grafana, carpeta Infraestructura > "VPS: visión general"
@@ -193,24 +209,28 @@ curl -s -X POST http://127.0.0.1:9093/api/v2/alerts -H 'Content-Type: applicatio
 Es lo que ejecutará el CI. Ninguna necesita secretos reales: se pasan valores ficticios.
 
 ```bash
-cd monitoring
 TELEGRAM_BOT_TOKEN=ficticio GRAFANA_ADMIN_PASSWORD=ficticio docker compose config -q
 
-# Sintaxis de la configuración y de las reglas
-docker run --rm --entrypoint promtool \
-  -v "$PWD/prometheus:/etc/prometheus:ro" \
-  prom/prometheus:v3.15.0 check config /etc/prometheus/prometheus.yml
-
 # Tests unitarios de las reglas: ¿saltan cuando deben y NO saltan cuando no?
+# (tests/ no entra en la imagen, así que se ejecutan desde el fuente)
 docker run --rm --entrypoint promtool \
   -v "$PWD/prometheus:/p:ro" \
   prom/prometheus:v3.15.0 test rules /p/tests/alerts_test.yml
 
-# Configuración de Alertmanager
-docker run --rm --entrypoint sh \
-  -v "$PWD/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro" \
-  prom/alertmanager:v0.34.1 -c \
+# Se validan los ARTEFACTOS: la configuración dentro de las imágenes construidas,
+# que es lo que de verdad correrá. Si el COPY de un Dockerfile fallara o apuntara a
+# otra ruta, esto lo detecta y validar el fuente no.
+docker build -q -t infra-prometheus:ci prometheus
+docker run --rm --entrypoint promtool infra-prometheus:ci \
+  check config /etc/prometheus/prometheus.yml
+
+docker build -q -t infra-alertmanager:ci alertmanager
+docker run --rm --entrypoint sh infra-alertmanager:ci -c \
   'echo x > /tmp/telegram_token && amtool check-config /etc/alertmanager/alertmanager.yml'
+
+docker build -q -t infra-blackbox:ci blackbox
+docker run --rm infra-blackbox:ci \
+  --config.check --config.file=/etc/blackbox/blackbox.yml
 ```
 
 Los tests son equivalentes a `pytest` para la monitorización. Se comprobó que tienen dientes:
@@ -282,6 +302,9 @@ Currently holds the **monitoring stack**: Prometheus scraping node_exporter (hos
 - Secrets live in Coolify, never in this repo. `docker compose down -v` wipes the metrics volume.
 
 ```bash
-cd monitoring
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
+
+Configuration is **baked into the images** (one Dockerfile per service): a Coolify Docker
+Compose resource does not place the repo at a path usable for file bind mounts, but `build:`
+does use the repo clone. Changing config means rebuild + redeploy.
