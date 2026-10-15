@@ -81,30 +81,25 @@ scrape_configs:
     #
     # Cada URL lleva ETIQUETAS FIJAS que Prometheus pega a todas las métricas
     # que salen de ella (probe_success{app="paufer", tier="web", ...}):
-    #   app     a qué aplicación pertenece (lo que tú piensas, no "la URL").
-    #           Permite agrupar y rotular "Paufer · web" en vez de una URL.
-    #   tier    web o api: los dos papeles de cada app.
-    #   cluster lo EXIGE el dashboard de la comunidad "Blackbox Exporter"
-    #           (id 16124): sus 20 consultas filtran por cluster="$cluster", una
-    #           etiqueta heredada de los mixins de Kubernetes. Aquí hay un único
-    #           "clúster", el VPS, y se le da un valor fijo. Sin ella ese
-    #           dashboard saldría vacío.
+    #   app   a qué aplicación pertenece (lo que tú piensas, no "la URL").
+    #         Permite agrupar y rotular "Paufer · web" en vez de una URL.
+    #   tier  web o api: los dos papeles de cada app.
     # Las alertas no cambian: siguen agrupando por alertname e instance.
     static_configs:
       - targets: ["https://app.paufer.es"]
-        labels: {cluster: vps-hetzner, app: paufer, tier: web}
+        labels: {app: paufer, tier: web}
       - targets: ["https://api.paufer.es/health"]
-        labels: {cluster: vps-hetzner, app: paufer, tier: api}
+        labels: {app: paufer, tier: api}
       - targets: ["https://gaston.paufer.es"]
-        labels: {cluster: vps-hetzner, app: gaston, tier: web}
+        labels: {app: gaston, tier: web}
       - targets: ["https://api-gaston.paufer.es/health"]
-        labels: {cluster: vps-hetzner, app: gaston, tier: api}
+        labels: {app: gaston, tier: api}
       - targets: ["https://multas.paufer.es"]
-        labels: {cluster: vps-hetzner, app: multas, tier: web}
+        labels: {app: multas, tier: web}
       # Multas enruta /api al backend con Traefik, por eso cuelga del mismo
       # dominio y su endpoint de salud se llama /api/v1/salud.
       - targets: ["https://multas.paufer.es/api/v1/salud"]
-        labels: {cluster: vps-hetzner, app: multas, tier: api}
+        labels: {app: multas, tier: api}
 
     # Tres reglas, aplicadas en este ORDEN a cada URL. Los nombres con "__"
     # son campos internos que solo existen mientras Prometheus prepara la
