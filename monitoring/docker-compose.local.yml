@@ -28,3 +28,17 @@ services:
   alertmanager:
     ports:
       - "127.0.0.1:9093:9093"
+
+  # En producción Grafana entra por Traefik con HTTPS y no publica ningún puerto.
+  # En local no hay Traefik ni HTTPS, así que:
+  #  - se publica el 3000 solo en 127.0.0.1 (solo tu máquina);
+  #  - ROOT_URL apunta a localhost (si no, los enlaces irían a grafana.paufer.es);
+  #  - cookie_secure=false: una cookie "Secure" solo viaja por HTTPS y sin esto
+  #    no se podría iniciar sesión en http://localhost:3000.
+  # Estas tres cosas NO deben llegar nunca al docker-compose.yml de producción.
+  grafana:
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_SECURITY_COOKIE_SECURE: "false"

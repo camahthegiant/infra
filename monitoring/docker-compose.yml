@@ -243,6 +243,84 @@ services:
     # Escucha en el 9093 de fábrica. Sin "ports:": solo Prometheus le habla,
     # por la red interna.
 
+  # ---------------------------------------------------------------------------
+  # grafana: los dashboards. No guarda métricas (eso es Prometheus): solo las
+  # lee y las dibuja.
+  #
+  # ES LO ÚNICO DE TODO ESTE STACK ALCANZABLE DESDE INTERNET (por Traefik, en
+  # grafana.paufer.es), así que la seguridad pesa aquí más que en cualquier otra
+  # pieza: contraseña obligatoria y fuerte, sin registro, sin acceso anónimo,
+  # cookie solo por HTTPS y versión con parches recientes.
+  # ---------------------------------------------------------------------------
+  grafana:
+    # Fijada. Es lo único con una puerta a internet: al actualizar, mirar sus
+    # avisos de seguridad.
+    image: grafana/grafana:13.2.4
+    restart: unless-stopped
+
+    environment:
+      # Nombre del administrador. Configurable porque el primer ataque que verá
+      # cualquier login público es "admin" con contraseñas comunes; un nombre
+      # distinto en Coolify ayuda (poco, pero es gratis).
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+
+      # Obligatoria (":?"): si falta, el despliegue falla. Sin ella Grafana
+      # arrancaría con admin/admin, de dominio público. Es un secret de Coolify,
+      # nunca en el repo.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?falta el secret GRAFANA_ADMIN_PASSWORD}
+
+      # Nadie puede crearse una cuenta: sin esto, cualquiera que llegue a la URL
+      # se registra.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+
+      # Sin acceso sin login. Se fija explícito para que quede escrito aunque el
+      # valor por defecto ya sea este.
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+
+      # La URL real. Grafana la usa para enlaces y redirecciones; sin ella
+      # apuntarían a localhost:3000.
+      GF_SERVER_ROOT_URL: https://grafana.paufer.es
+
+      # La cookie de sesión solo viaja por HTTPS: no se puede robar en una
+      # conexión sin cifrar. En local se desactiva (ver docker-compose.local.yml).
+      GF_SECURITY_COOKIE_SECURE: "true"
+
+      # Sin telemetría ni comprobación de actualizaciones: tráfico saliente
+      # innecesario desde el VPS.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+
+    volumes:
+      # Su base de datos (SQLite): usuarios y preferencias. Sin él, cada
+      # redeploy te devolvería a cero.
+      - grafana_data:/var/lib/grafana
+      # Configuración como código: de qué Prometheus lee y qué dashboards carga.
+      # En SOLO LECTURA a propósito: lo que se cambie a mano en la interfaz se
+      # pierde en el siguiente arranque. Limitación consciente a cambio de que
+      # todo sea reproducible desde el repo.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+    # MEDIDO en local (2026-10-15): 141 MB a los 2 minutos de arrancar, en
+    # reposo. Grafana crece con el uso (dashboards abiertos, caché de
+    # consultas, sesiones), así que 192 MB dejaba solo ~50 MB de margen y el
+    # kernel acabaría matándolo (OOM) y reiniciándolo. 256 MB deja holgura; la
+    # suma de topes de todo el stack queda en ~750 MB sobre ~1500 MB disponibles
+    # en el VPS. Revisar con datos reales tras el despliegue.
+    mem_limit: 256m
+
+    # Sin "ports:": entra por Traefik, que es quien habla con internet. Estos
+    # labels son los mismos que usan Paufer, Gast-On y Multas (router, HTTPS,
+    # Let's Encrypt y puerto interno 3000, el de fábrica de Grafana).
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.paufer.es`)"
+      - "traefik.http.routers.grafana.entrypoints=https"
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
 volumes:
   prometheus_data:
   alertmanager_data:
+  grafana_data:

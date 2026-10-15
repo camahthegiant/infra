@@ -1,0 +1,48 @@
+# De dónde lee los datos Grafana.
+#
+# Grafana por sí sola no sabe que Prometheus existe. En una instalación a mano
+# habría que entrar en la interfaz (Connections > Data sources > Add), escribir
+# la URL y guardar. Este fichero hace exactamente eso al arrancar, desde el
+# repo, de forma reproducible.
+#
+# Sin él Grafana arrancaría sin ningún origen de datos y los dashboards
+# saldrían vacíos con un error de "datasource not found".
+#
+# Solo se lee al arrancar: si se cambia, hay que reiniciar el contenedor.
+
+# Versión del formato del fichero de provisioning. Siempre 1.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+
+    # Identificador FIJO. Importante: los dashboards se refieren al origen por
+    # su uid, no por el nombre. Si no se fija, Grafana genera uno aleatorio en
+    # cada instalación y el dashboard (que viene en un fichero) apuntaría a un
+    # uid que no existe.
+    uid: prometheus
+
+    type: prometheus
+
+    # "proxy": las consultas las hace el SERVIDOR de Grafana, no tu navegador.
+    # Por eso Prometheus no necesita estar expuesto: tu navegador solo habla con
+    # Grafana. Con "direct" el navegador tendría que llegar a prometheus:9090 y
+    # habría que publicarlo.
+    access: proxy
+
+    # Nombre del servicio en docker-compose.yml y su puerto de fábrica, como en
+    # prometheus.yml. Funciona por la red interna de Docker.
+    url: http://prometheus:9090
+
+    # El que usan los paneles que no indican otro. Hay uno solo.
+    isDefault: true
+
+    # No se puede modificar desde la interfaz. Coherente con los volúmenes en
+    # solo lectura: la fuente de la verdad es este repo.
+    editable: false
+
+    jsonData:
+      # Cada cuánto recoge datos Prometheus (coincide con scrape_interval).
+      # Grafana lo usa para calcular bien funciones de tasa como rate(): con un
+      # valor equivocado esos gráficos salen mal.
+      timeInterval: 30s

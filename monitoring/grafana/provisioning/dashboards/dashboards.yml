@@ -1,0 +1,46 @@
+# Proveedor de dashboards: DÓNDE busca Grafana los paneles ya dibujados.
+#
+# datasources/prometheus.yml le dice de dónde leer DATOS; este le dice dónde
+# buscar DASHBOARDS. Un dashboard es un fichero JSON en una carpeta y Grafana no
+# mira carpetas por su cuenta: este fichero es el que dice "vigila esta carpeta
+# y carga todo lo que haya".
+#
+# Sin él, el dashboard existiría en el repo y en el contenedor y Grafana no lo
+# vería nunca, sin dar ningún error. Es lo más molesto de depurar.
+
+apiVersion: 1
+
+providers:
+  # Solo identifica al proveedor en los logs.
+  - name: vps
+
+    # Grafana admite varias "organizaciones"; aquí hay una sola, la 1.
+    orgId: 1
+
+    # Carpeta DENTRO de Grafana donde aparecerán. No tiene que ver con la
+    # carpeta del disco.
+    folder: Infraestructura
+
+    # Los dashboards vienen de ficheros (el tipo estándar).
+    type: file
+
+    # No se pueden borrar ni guardar cambios desde la interfaz: el repo manda.
+    # Misma lógica que "editable: false" del datasource y los volúmenes :ro.
+    # Evita que alguien "arregle" un panel a mano y lo pierda al reiniciar sin
+    # entender por qué. Sí se puede abrir un panel y editarlo para PROBAR una
+    # consulta; el flujo es ajustarlo en la interfaz, copiar el JSON al repo y
+    # commitearlo.
+    disableDeletion: true
+    allowUiUpdates: false
+
+    # Cada cuánto revisa la carpeta. Si se edita el JSON y se redespliega, lo
+    # recoge solo en ~30 s, sin reiniciar Grafana (a diferencia del datasource,
+    # que solo se lee al arrancar).
+    updateIntervalSeconds: 30
+
+    options:
+      # Carpeta DENTRO DEL CONTENEDOR. Tiene que coincidir letra por letra con
+      # el segundo volumen del servicio grafana en docker-compose.yml:
+      #   ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Si no coincide, Grafana busca en una carpeta vacía y no dice nada.
+      path: /var/lib/grafana/dashboards
