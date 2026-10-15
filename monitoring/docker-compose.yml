@@ -1,0 +1,155 @@
+# Monitorización del VPS (Paufer, Gast-On, Multas).
+#
+# Este fichero describe los contenedores que miden y vigilan el servidor.
+# Coolify lo clona del repo y lo ejecuta como un recurso más; en local se
+# prueba con: docker compose up
+#
+# Reglas que se aplican a TODO lo de aquí abajo:
+#   - Versiones de imagen fijadas, nunca "latest": un redeploy no debe traer
+#     una versión distinta sin avisar (así cayó Gast-On el 2026-09-25).
+#   - Cada servicio con mem_limit: el VPS tiene 4 GB y sin swap. Si algo se
+#     desboca, que muera la monitorización y no el backend de producción.
+#   - Sin "ports:" salvo Grafana (vía Traefik): lo que no se publica no se
+#     puede atacar desde fuera.
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # node_exporter: métricas del SERVIDOR (CPU, RAM, disco, load).
+  # Lee del sistema operativo y lo publica en una página interna que Prometheus
+  # consulta. Sin él, Prometheus no sabría nada del servidor, solo de
+  # contenedores sueltos.
+  # ---------------------------------------------------------------------------
+  node_exporter:
+    image: prom/node-exporter:v1.12.1
+
+    # Si el contenedor cae, Docker lo levanta. A diferencia de "always", si lo
+    # paro yo a mano (mantenimiento) no insiste en reiniciarlo.
+    restart: unless-stopped
+
+    # Por defecto un contenedor solo ve SUS procesos. Con esto ve los del
+    # servidor y puede medirlos. Sin esto mediría únicamente el propio
+    # contenedor, que no interesa. Es un permiso amplio, por eso el resto de
+    # la configuración es lo más restrictiva posible.
+    pid: host
+
+    # Le dice dónde está el sistema de ficheros del servidor DENTRO del
+    # contenedor (montado abajo en /host). Sin esto mediría el disco del
+    # contenedor, no el del VPS.
+    command:
+      - --path.rootfs=/host
+
+    volumes:
+      # Monta "/" del servidor en /host, en SOLO LECTURA (ro): puede mirar,
+      # nunca modificar. "rslave" hace que vea también los discos montados
+      # después de arrancar el contenedor.
+      - /:/host:ro,rslave
+
+    # Tope duro de memoria. El consumo normal ronda 10-20 MB; 32 MB deja
+    # margen sin permitir que crezca sin control.
+    mem_limit: 32m
+
+    # NO tiene "ports:" a propósito: nadie fuera de la red del compose puede
+    # hablarle. Solo Prometheus, que vive en la misma red.
+    #
+    # Limitación conocida: al no usar "network_mode: host" (que dejaría el
+    # puerto 9100 abierto a internet en el servidor), no veremos el tráfico de
+    # las interfaces del servidor. No importa: cAdvisor da la red por contenedor.
+
+  # ---------------------------------------------------------------------------
+  # cadvisor: métricas POR CONTENEDOR (CPU, RAM, red, reinicios).
+  # node_exporter dice cómo está el servidor en conjunto; cAdvisor dice QUÉ
+  # contenedor consume qué, y cuántas veces se ha reiniciado. Es la pieza que
+  # habría detectado el bucle de reinicios de Gast-On del 2026-09-25.
+  # ---------------------------------------------------------------------------
+  cadvisor:
+    # En ghcr.io y no en gcr.io: gcr.io ya no publica esta versión (comprobado).
+    image: ghcr.io/google/cadvisor:v0.60.6
+    restart: unless-stopped
+
+    command:
+      # Solo contenedores Docker. Sin esto reporta también cada proceso y
+      # cgroup del sistema: miles de métricas que nadie va a mirar.
+      - --docker_only=true
+      # Cada cuánto recoge datos. Por defecto 1 s; con 30 s (lo mismo que
+      # consulta Prometheus) baja mucho el consumo de CPU en un VPS de 2 vCPU.
+      - --housekeeping_interval=30s
+      # Apaga familias de métricas que no vamos a usar. Menos métricas = menos
+      # RAM en Prometheus y menos CPU aquí. Si algún día hacen falta, se quita
+      # de esta lista.
+      - --disable_metrics=disk,tcp,udp,percpu,sched,process,hugetlb,referenced_memory,resctrl
+
+    # cAdvisor mide leyendo cómo el kernel y Docker reparten los recursos.
+    # Todo en solo lectura (:ro).
+    #
+    # AVISO DE SEGURIDAD: montar /var/run da acceso al socket de Docker. El
+    # ":ro" solo impide reescribir el fichero del socket; NO limita lo que se
+    # puede ordenar a Docker a través de él, que en la práctica equivale a ser
+    # administrador del servidor. Es un riesgo conocido y aceptado: es la imagen
+    # oficial de Google, con versión fijada, y no se expone a ninguna red
+    # pública. Lo que NO hay que hacer nunca es publicar su puerto.
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+
+    # Para detectar cuándo el kernel mata un proceso por falta de memoria
+    # (OOM kill): justo lo que querrías saber si el VPS se queda sin RAM.
+    devices:
+      - /dev/kmsg
+
+    # Con ~16 contenedores consume unos 60-100 MB. Es el más hambriento de los
+    # exportadores, de ahí el margen respecto a node_exporter.
+    mem_limit: 128m
+
+    # Sin "ports:" a propósito, igual que node_exporter.
+
+  # ---------------------------------------------------------------------------
+  # prometheus: el cerebro. Cada 30 s visita a cada exportador, lee sus números
+  # y los guarda con la hora (modelo "pull": va él a por los datos, los
+  # exportadores no necesitan saber que existe, y por eso no hace falta abrir
+  # ningún puerto hacia fuera). También evalúa las reglas de alerta.
+  # A quién visita se define en prometheus/prometheus.yml.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+
+    command:
+      # Dónde está su configuración DENTRO del contenedor (se monta abajo).
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Dónde guarda los datos (es el volumen prometheus_data, abajo).
+      - --storage.tsdb.path=/prometheus
+      # Borra datos con más de 15 días: suficiente para ver tendencias y
+      # comparar esta semana con la anterior, sin acumular de más.
+      - --storage.tsdb.retention.time=15d
+      # Red de seguridad: si por lo que sea los datos crecen (más métricas de
+      # las previstas), borra los más viejos antes de pasar de 2 GB, en vez de
+      # llenar el disco, que es compartido con las bases de datos de las apps.
+      # Estimación esperada: ~13 MB/día, ~200 MB en 15 días; 2 GB es un tope
+      # 10 veces mayor, no la expectativa. Se confirmará con datos reales.
+      - --storage.tsdb.retention.size=2GB
+      # --web.enable-lifecycle NO se activa a propósito: permitiría recargar y
+      # apagar Prometheus por HTTP, una API que cualquiera con acceso a la red
+      # interna podría usar. Para recargar la config se reinicia el contenedor.
+
+    volumes:
+      # La configuración vive en el repo (config-as-code): para cambiarla se
+      # edita el fichero, se hace commit y se redespliega. En solo lectura.
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Volumen con nombre: sin él, cada redeploy borraría todo el histórico
+      # porque los datos vivirían dentro del contenedor, que se destruye al
+      # recrearse. OJO: "docker compose down -v" lo borra.
+      - prometheus_data:/prometheus
+
+    # El que más memoria necesita de la pila (crece con el número de series).
+    # Con lo que medimos debería ir sobrado. Si se queda corto Docker lo
+    # reinicia y nos enteraremos por la alerta de reinicios, que es el
+    # mecanismo previsto.
+    mem_limit: 256m
+
+    # Sin "ports:": a Prometheus lo consulta Grafana por la red interna.
+
+volumes:
+  prometheus_data:

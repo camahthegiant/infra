@@ -1,0 +1,23 @@
+# SOLO PARA PROBAR EN LOCAL. No se despliega nunca.
+#
+# El docker-compose.yml de producción no publica ningún puerto a propósito:
+# nada de Prometheus debe poder alcanzarse desde fuera del servidor. Pero para
+# probarlo en tu máquina hace falta ver su interfaz en el navegador.
+#
+# Este fichero añade ese puerto SIN tocar el de producción: si se editara el
+# principal para probar y se olvidara quitar el "ports:", se publicaría
+# Prometheus en el VPS. Con un fichero aparte, producción ni lo ve.
+#
+# Uso (los dos ficheros, explícitos; no se llama "override" a propósito para
+# que Docker no lo cargue por su cuenta sin que se vea):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up
+#
+# Coolify usa solo docker-compose.yml, por lo que este fichero no le afecta.
+
+services:
+  prometheus:
+    ports:
+      # "127.0.0.1:" delante es la parte importante: solo tu propia máquina
+      # puede entrar. Sin ello, el puerto quedaría abierto a toda tu red local.
+      - "127.0.0.1:9090:9090"

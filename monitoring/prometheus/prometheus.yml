@@ -1,0 +1,42 @@
+# Configuración de Prometheus: a QUIÉN pregunta y CON QUÉ frecuencia.
+#
+# Sin este fichero Prometheus arrancaría y funcionaría perfectamente... sin
+# medir nada. Es lo que convierte "tengo un servidor de métricas" en "mido
+# estas cosas".
+#
+# Se monta en el contenedor desde docker-compose.yml (en solo lectura).
+# Se valida con: promtool check config prometheus.yml (lo hará el CI).
+
+global:
+  # Cada cuánto visita a cada objetivo. 30 s es un equilibrio: más rápido
+  # gasta RAM y disco sin que se note en un dashboard; más lento tarda más en
+  # detectar una caída. Coincide con el housekeeping_interval de cAdvisor, así
+  # nunca lee un dato más viejo que lo que cAdvisor ha recogido.
+  scrape_interval: 30s
+
+  # Cada cuánto evalúa las reglas de alerta. Aún no hay reglas (fase 3); se
+  # fija ya al mismo ritmo para que, cuando lleguen, se evalúen con cada lectura.
+  evaluation_interval: 30s
+
+scrape_configs:
+
+  # Prometheus se mide a sí mismo. Sirve para saber cuánta memoria usa o
+  # cuántas series guarda: es lo que dirá si el tope de 256 MB se queda corto.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # El servidor (CPU, RAM, disco, load). "node_exporter" NO es una IP: es el
+  # nombre del servicio en docker-compose.yml. Docker crea una red interna
+  # donde cada servicio se encuentra por su nombre; si se renombra el servicio
+  # en el compose hay que renombrarlo aquí, o Prometheus dejará de encontrarlo.
+  # 9100 es el puerto en el que escucha node_exporter de fábrica (EXPOSE de la
+  # imagen). Funciona por la red interna: no hace falta "ports:" en el compose.
+  - job_name: node
+    static_configs:
+      - targets: ["node_exporter:9100"]
+
+  # Los contenedores, uno a uno. cAdvisor escucha en 8080 de fábrica.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
