@@ -1,31 +1,63 @@
 {
   "uid": "vps-overview",
-  "title": "VPS: visión general",
-  "description": "Estado del VPS de Paufer, Gast-On y Multas. Definido como código en el repo infra: no se edita desde la interfaz (se pierde al reiniciar).",
+  "title": "VPS · visión general",
+  "description": "Portada del VPS de Paufer, Gast-On y Multas. Generado por grafana/tools/gen_vps_dashboard.py: no se edita desde la interfaz (se pierde).",
   "tags": [
     "infra",
     "vps"
   ],
   "timezone": "browser",
   "editable": false,
+  "graphTooltip": 1,
   "refresh": "30s",
   "time": {
-    "from": "now-6h",
+    "from": "now-24h",
     "to": "now"
   },
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "hide": 2,
+        "query": {
+          "query": "label_values(probe_success, app)",
+          "refId": "app"
+        },
+        "definition": "label_values(probe_success, app)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 1,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
       "type": "stat",
-      "title": "Estado de los servicios",
-      "description": "¿Responden las URLs públicas, vistas como las ve un usuario? Lo mide blackbox desde dentro del VPS. Rojo = la sonda falla (HTTP no 2xx, timeout o TLS roto). Equivale a la alerta ServicioCaido, que solo avisa tras 2 minutos seguidos en rojo: un redeploy normal (~1 min) se verá rojo aquí pero no avisará.",
+      "title": "Estado general",
+      "description": "Resumen de las 6 sondas HTTP (web y API de las tres apps). Verde = todas responden; rojo = al menos una falla. Una caída corta (un redeploy dura ~1 min) se ve rojo aquí pero NO avisa: la alerta ServicioCaido espera 2 minutos seguidos.",
       "gridPos": {
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 4
+        "h": 3
       },
       "datasource": {
         "type": "prometheus",
@@ -37,8 +69,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "probe_success",
-          "legendFormat": "{{instance}}",
+          "expr": "min(probe_success)",
+          "legendFormat": "",
           "refId": "A",
           "instant": true,
           "range": false
@@ -46,7 +78,23 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "● HAY SERVICIOS CAÍDOS",
+                  "color": "red",
+                  "index": 1
+                },
+                "1": {
+                  "text": "● TODO OK",
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -60,6 +108,59 @@
               }
             ]
           },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "$app",
+      "description": "Web y API de esta app, vistas como las ve un usuario (blackbox, cada 30 s). Las tarjetas salen de la etiqueta app de las sondas (prometheus.yml).",
+      "repeat": "app",
+      "repeatDirection": "h",
+      "maxPerRow": 4,
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "probe_success{app=\"$app\"}",
+          "legendFormat": "{{tier}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
           "mappings": [
             {
               "type": "value",
@@ -77,6 +178,19 @@
               }
             }
           ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
           "color": {
             "mode": "thresholds"
           }
@@ -88,6 +202,7 @@
         "graphMode": "none",
         "textMode": "value_and_name",
         "justifyMode": "center",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -98,15 +213,15 @@
       }
     },
     {
-      "id": 2,
-      "type": "timeseries",
-      "title": "Tiempo de respuesta",
-      "description": "Cuánto tarda cada URL en contestar, incluida la redirección y el handshake TLS. Medido desde el propio VPS, así que es el tiempo de Traefik + app, sin la red de internet. Una subida sostenida suele anticipar un problema de RAM o de CPU. El timeout de la sonda es 10 s.",
+      "id": 3,
+      "type": "state-timeline",
+      "title": "Estado, última ventana de tiempo",
+      "description": "Cada fila es una sonda; verde = responde, rojo = falla. Sirve para ver de un vistazo CUÁNDO cayó algo y CUÁNTO duró, cosa que un número suelto no dice. Un corte de ~1 minuto coincide con un despliegue.",
       "gridPos": {
         "x": 0,
-        "y": 4,
-        "w": 12,
-        "h": 8
+        "y": 8,
+        "w": 24,
+        "h": 7
       },
       "datasource": {
         "type": "prometheus",
@@ -118,47 +233,76 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "probe_duration_seconds",
-          "legendFormat": "{{instance}}",
+          "expr": "probe_success",
+          "legendFormat": "{{app}} · {{tier}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "CAÍDO",
+                  "color": "red",
+                  "index": 1
+                },
+                "1": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
           "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          },
-          "min": 0
+            "fillOpacity": 85,
+            "lineWidth": 0
+          }
         },
         "overrides": []
       },
       "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "rowHeight": 0.8,
+        "alignValue": "center",
         "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
+          "showLegend": false
         },
         "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+          "mode": "single"
         }
       }
     },
     {
-      "id": 3,
-      "type": "bargauge",
-      "title": "Días hasta caducar el certificado",
-      "description": "Días que le quedan al certificado TLS de cada URL. Let's Encrypt dura 90 días y Traefik lo renueva solo hacia los 30: lo normal es ver entre 30 y 90. Si baja de 14 es que la renovación falla en silencio (alerta CertificadoPorCaducar). Revisar los logs de Traefik en Coolify.",
+      "id": 4,
+      "type": "gauge",
+      "title": "RAM libre",
+      "description": "RAM realmente aprovechable (MemAvailable: cuenta la caché que el kernel puede soltar, no solo la 'libre') sobre el total. El VPS no tiene swap: al agotarse, el kernel mata procesos. Rojo por debajo del ~8 % = los 300 MB de la alerta MemoriaDisponibleBaja.",
       "gridPos": {
-        "x": 12,
-        "y": 4,
-        "w": 12,
-        "h": 8
+        "x": 0,
+        "y": 15,
+        "w": 6,
+        "h": 5
       },
       "datasource": {
         "type": "prometheus",
@@ -170,8 +314,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(probe_ssl_earliest_cert_expiry - time()) / 86400",
-          "legendFormat": "{{instance}}",
+          "expr": "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
+          "legendFormat": "",
           "refId": "A",
           "instant": true,
           "range": false
@@ -179,7 +323,10 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "d",
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -188,24 +335,24 @@
                 "value": null
               },
               {
+                "color": "orange",
+                "value": 0.08
+              },
+              {
                 "color": "green",
-                "value": 14
+                "value": 0.2
               }
             ]
           },
-          "min": 0,
-          "max": 90,
           "color": {
             "mode": "thresholds"
-          },
-          "decimals": 0
+          }
         },
         "overrides": []
       },
       "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true,
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false,
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -216,83 +363,15 @@
       }
     },
     {
-      "id": 4,
-      "type": "timeseries",
-      "title": "RAM disponible del VPS",
-      "description": "RAM realmente aprovechable (MemAvailable: cuenta la caché que el kernel puede soltar, no solo la 'libre'). El VPS no tiene swap: cuando se agota, el kernel mata procesos sin preguntar. La línea roja marca los 300 MB de la alerta MemoriaDisponibleBaja. Medición base (2026-10-15): ~1500 MB.",
-      "gridPos": {
-        "x": 0,
-        "y": 12,
-        "w": 12,
-        "h": 8
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "node_memory_MemAvailable_bytes",
-          "legendFormat": "RAM disponible",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "thresholdsStyle": {
-              "mode": "line"
-            }
-          },
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 314572800
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
       "id": 5,
-      "type": "timeseries",
-      "title": "CPU del VPS",
-      "description": "Porcentaje de CPU en uso (todos los núcleos). 1 − tiempo en reposo. El VPS tiene 2 vCPU; los picos cortos al generar un horario (solver OR-Tools) son normales. Lo preocupante es un nivel alto sostenido. De momento no tiene alerta: se decidirá el umbral con datos reales.",
+      "type": "gauge",
+      "title": "CPU en uso",
+      "description": "Porcentaje de CPU en uso (todos los núcleos) en los últimos 5 min. El VPS tiene 2 vCPU; los picos cortos al generar un horario (solver OR-Tools) son normales. Lo preocupante es un nivel alto sostenido. Sin alerta todavía: el umbral se decidirá con datos reales.",
       "gridPos": {
-        "x": 12,
-        "y": 12,
-        "w": 12,
-        "h": 8
+        "x": 6,
+        "y": 15,
+        "w": 6,
+        "h": 5
       },
       "datasource": {
         "type": "prometheus",
@@ -305,112 +384,7 @@
             "uid": "prometheus"
           },
           "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
-          "legendFormat": "CPU en uso",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          },
-          "min": 0,
-          "max": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 6,
-      "type": "timeseries",
-      "title": "Memoria por contenedor",
-      "description": "RAM de cada contenedor (working set). Responde a '¿quién se come la memoria?'. Los nombres son los de Coolify (tipo backend-g7r8rl4s…): pendiente de mapearlos a cada app.",
-      "gridPos": {
-        "x": 0,
-        "y": 20,
-        "w": 16,
-        "h": 9
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "container_memory_working_set_bytes{name!=\"\"}",
-          "legendFormat": "{{name}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          },
-          "min": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 7,
-      "type": "stat",
-      "title": "Reinicios por contenedor (última hora)",
-      "description": "Cuántas veces ha arrancado cada contenedor en la última hora. 0 es lo sano. Un redeploy crea contenedores con nombre nuevo, así que no cuenta como reinicio. Subir a 3 o más en 10 min es el bucle de reinicios de Gast-On del 2026-09-25 (alerta ContenedorEnBucleDeReinicios).",
-      "gridPos": {
-        "x": 16,
-        "y": 20,
-        "w": 8,
-        "h": 9
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "changes(container_start_time_seconds{name!=\"\"}[1h])",
-          "legendFormat": "{{name}}",
+          "legendFormat": "",
           "refId": "A",
           "instant": true,
           "range": false
@@ -418,7 +392,10 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -427,16 +404,15 @@
                 "value": null
               },
               {
-                "color": "yellow",
-                "value": 1
+                "color": "orange",
+                "value": 0.6
               },
               {
                 "color": "red",
-                "value": 3
+                "value": 0.85
               }
             ]
           },
-          "mappings": [],
           "color": {
             "mode": "thresholds"
           }
@@ -444,10 +420,8 @@
         "overrides": []
       },
       "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false,
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -456,6 +430,336 @@
           "values": false
         }
       }
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "Disco /",
+      "description": "Porcentaje usado del disco raíz. Es compartido por las bases de datos de las tres apps y por las imágenes de Docker. Sin alerta todavía: este panel es el primer aviso visual.",
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay|squashfs\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "gauge",
+      "title": "Certificado (días)",
+      "description": "Días que le quedan al certificado más próximo a caducar. Let's Encrypt dura 90 días y Traefik renueva hacia los 30: lo normal es 30-90. Bajo 14 días (alerta CertificadoPorCaducar) es que la renovación falla en silencio.",
+      "gridPos": {
+        "x": 18,
+        "y": 15,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "min((probe_ssl_earliest_cert_expiry - time()) / 86400)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d",
+          "min": 0,
+          "max": 90,
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 14
+              },
+              {
+                "color": "green",
+                "value": 21
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Detalle",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Tiempo de respuesta",
+          "description": "Cuánto tarda cada URL en contestar (redirecciones y TLS incluidos). Medido desde el propio VPS: es el tiempo de Traefik + app, sin la red de internet. Una subida sostenida suele anticipar un problema de RAM o CPU. El timeout de la sonda es 10 s.",
+          "gridPos": {
+            "x": 0,
+            "y": 21,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "probe_duration_seconds",
+              "legendFormat": "{{app}} · {{tier}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "gradientMode": "opacity",
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Memoria por contenedor (los 8 mayores)",
+          "description": "RAM de cada contenedor (working set), los 8 que más usan. Los nombres son los de Coolify (backend-g7r8rl4s…): pendiente de mapearlos a cada app con las etiquetas que ponga Coolify en el VPS.",
+          "gridPos": {
+            "x": 12,
+            "y": 21,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "topk(8, container_memory_working_set_bytes{name!=\"\"})",
+              "legendFormat": "{{name}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "gradientMode": "opacity",
+                "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 11,
+          "type": "stat",
+          "title": "Reinicios por contenedor (última hora)",
+          "description": "Cuántas veces ha arrancado cada contenedor en la última hora. 0 es lo sano. Un redeploy crea contenedores con nombre nuevo, así que no cuenta. 3 o más en 10 min es el bucle de reinicios de Gast-On del 2026-09-25 (alerta ContenedorEnBucleDeReinicios).",
+          "gridPos": {
+            "x": 0,
+            "y": 29,
+            "w": 24,
+            "h": 5
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "changes(container_start_time_seconds{name!=\"\"}[1h])",
+              "legendFormat": "{{name}}",
+              "refId": "A",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 3
+                  }
+                ]
+              },
+              "color": {
+                "mode": "thresholds"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value_and_name",
+            "justifyMode": "center",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          }
+        }
+      ]
     }
   ]
 }
