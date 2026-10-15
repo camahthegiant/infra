@@ -119,18 +119,18 @@ services:
   #   Se cubren con un chequeo externo gratuito (UptimeRobot o similar).
   # ---------------------------------------------------------------------------
   blackbox_exporter:
-    # Fijada a la misma versión con la que se validó blackbox.yml
-    # (--config.check). Validar con una y desplegar otra anularía la prueba.
-    image: prom/blackbox-exporter:v0.29.0
+    # La imagen se CONSTRUYE (blackbox/Dockerfile): lleva dentro blackbox.yml.
+    # Coolify no deja montar ficheros del repo en un recurso Docker Compose, así
+    # que la configuración va horneada en la imagen. La versión fijada está en
+    # el FROM del Dockerfile.
+    build: ./blackbox
     restart: unless-stopped
 
     # Sin esta línea usaría los módulos por defecto de la imagen y nuestro
-    # blackbox.yml se ignoraría en silencio.
+    # blackbox.yml se ignoraría en silencio. La ruta tiene que coincidir con el
+    # COPY de blackbox/Dockerfile.
     command:
       - --config.file=/etc/blackbox/blackbox.yml
-
-    volumes:
-      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
 
     # Solo hace peticiones HTTP y devuelve un resultado: muy ligero.
     mem_limit: 32m
@@ -147,11 +147,15 @@ services:
   # A quién visita se define en prometheus/prometheus.yml.
   # ---------------------------------------------------------------------------
   prometheus:
-    image: prom/prometheus:v3.15.0
+    # La imagen se CONSTRUYE (prometheus/Dockerfile): lleva dentro
+    # prometheus.yml y las reglas. Coolify no deja montar ficheros del repo en
+    # un recurso Docker Compose. La versión fijada está en el FROM.
+    build: ./prometheus
     restart: unless-stopped
 
     command:
-      # Dónde está su configuración DENTRO del contenedor (se monta abajo).
+      # Dónde está su configuración DENTRO del contenedor (la copia el
+      # Dockerfile).
       - --config.file=/etc/prometheus/prometheus.yml
       # Dónde guarda los datos (es el volumen prometheus_data, abajo).
       - --storage.tsdb.path=/prometheus
@@ -169,12 +173,10 @@ services:
       # interna podría usar. Para recargar la config se reinicia el contenedor.
 
     volumes:
-      # La configuración vive en el repo (config-as-code): para cambiarla se
-      # edita el fichero, se hace commit y se redespliega. En solo lectura.
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      # Carpeta entera, no un fichero: así una regla nueva (otro .yml) se
-      # carga sin tocar el compose. rule_files en prometheus.yml apunta aquí.
-      - ./prometheus/rules:/etc/prometheus/rules:ro
+      # Solo el volumen de DATOS. La configuración y las reglas ya no se montan:
+      # van dentro de la imagen (config-as-code igualmente: para cambiarlas se
+      # edita el fichero, se hace commit y se redespliega).
+      #
       # Volumen con nombre: sin él, cada redeploy borraría todo el histórico
       # porque los datos vivirían dentro del contenedor, que se destruye al
       # recrearse. OJO: "docker compose down -v" lo borra.
@@ -195,7 +197,10 @@ services:
   # Política en alertmanager/alertmanager.yml.
   # ---------------------------------------------------------------------------
   alertmanager:
-    image: prom/alertmanager:v0.34.1
+    # La imagen se CONSTRUYE (alertmanager/Dockerfile): lleva dentro
+    # alertmanager.yml. El TOKEN no va en la imagen: se escribe al arrancar
+    # (ver entrypoint). La versión fijada está en el FROM.
+    build: ./alertmanager
     restart: unless-stopped
 
     # El token llega como variable de entorno (así lo guarda Coolify) pero
@@ -232,7 +237,6 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?falta el secret TELEGRAM_BOT_TOKEN}
 
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       # Guarda los silencios y qué alertas ya se notificaron. Sin él, cada
       # redeploy olvidaría lo avisado y recibirías de nuevo todo lo activo.
       - alertmanager_data:/alertmanager
@@ -253,17 +257,13 @@ services:
   # cookie solo por HTTPS y versión con parches recientes.
   # ---------------------------------------------------------------------------
   grafana:
-    # Fijada. Es lo único con una puerta a internet: al actualizar, mirar sus
-    # avisos de seguridad.
-    #
-    # SERIE 12.4 A PROPÓSITO, no la 13 (que es más reciente). Medido con la
-    # misma configuración y la misma carga de consultas, en paralelo:
-    #   13.2.4  ->  300-320 MB, pegada al tope del contenedor
-    #   12.4.13 ->  114-118 MB, estable
-    # En un VPS de 4 GB y sin swap, tres veces más memoria no se justifica para
-    # un dashboard. 12.4 sigue recibiendo parches (12.4.13 salió el 2026-10-13,
-    # el mismo día que 13.2.4). Si algún día se pasa a la 13, repetir la medida.
-    image: grafana/grafana:12.4.13
+    # La imagen se CONSTRUYE (grafana/Dockerfile): lleva dentro el provisioning
+    # y la portada. Coolify no deja montar ficheros del repo en un recurso
+    # Docker Compose. La versión fijada y el porqué de la serie 12.4 frente a
+    # la 13 (300-320 MB frente a 114-118 MB, medido) están en el FROM del
+    # Dockerfile. Es lo único con una puerta a internet: al actualizar, mirar
+    # sus avisos de seguridad.
+    build: ./grafana
     restart: unless-stopped
 
     environment:
@@ -320,8 +320,8 @@ services:
 
       # Al entrar, Grafana abre directamente la portada (vps.json, generado
       # por grafana/tools/gen_vps_dashboard.py) en vez de su página de
-      # bienvenida. La ruta es la del contenedor: la misma carpeta que se monta
-      # en "volumes" más abajo.
+      # bienvenida. La ruta es la del contenedor: la misma carpeta a la que
+      # copia los dashboards grafana/Dockerfile.
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/vps.json
 
       # Tema oscuro por defecto: es el que mejor hace destacar el rojo y el
@@ -333,12 +333,10 @@ services:
       # Su base de datos (SQLite): usuarios y preferencias. Sin él, cada
       # redeploy te devolvería a cero.
       - grafana_data:/var/lib/grafana
-      # Configuración como código: de qué Prometheus lee y qué dashboards carga.
-      # En SOLO LECTURA a propósito: lo que se cambie a mano en la interfaz se
-      # pierde en el siguiente arranque. Limitación consciente a cambio de que
-      # todo sea reproducible desde el repo.
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # El provisioning y los dashboards ya NO se montan: van dentro de la
+      # imagen (grafana/Dockerfile). Lo que se cambie a mano en la interfaz se
+      # pierde igualmente en el siguiente despliegue: limitación consciente a
+      # cambio de que todo sea reproducible desde el repo.
 
     # MEDIDO en local (2026-10-15), Grafana 12.4.13 con el motor de alertas y
     # la preinstalación de plugins apagados: 114 MB en reposo y 114-118 MB tras
