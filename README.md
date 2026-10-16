@@ -1,18 +1,25 @@
 # infra
 
-Infraestructura compartida del VPS que aloja Paufer, Gast-On y Multas, como código.
+Infraestructura compartida de un VPS que aloja tres aplicaciones, como código.
 Hoy contiene la **monitorización**: saber qué está caído o saturado antes de que lo note un usuario.
+
+Es un proyecto personal de aprendizaje de DevOps, construido paso a paso con Claude Code como
+asistente. Está en producción, y los incidentes reales que fueron apareciendo (y cómo se
+resolvieron) están documentados abajo porque son lo más útil del repo.
 
 ## Estado
 
+Desplegado en producción (Hetzner + Coolify) y verificado de punta a punta, incluido un aviso
+real a Telegram. Coste medido en el VPS: unos 350 MB de RAM.
+
 | Fase | Qué | Estado |
 |---|---|---|
-| 1 | Métricas del servidor y de los contenedores (node_exporter, cAdvisor) + Prometheus | hecha, probada en local |
-| 2 | Sondas HTTP a las URLs públicas y caducidad de certificados (blackbox) | hecha, probada en local (6/6 URLs OK) |
-| 3 | Reglas de alerta y avisos a Telegram (Alertmanager) | hecha: envío real y ciclo firing/resolved probados; reglas con tests unitarios |
-| 4 | Grafana con dashboard provisionado, tras Traefik | hecha, probada en local (7/7 paneles con datos) |
-| 5 | Despliegue en Coolify y medida real de RAM en el VPS | en curso: el primer intento falló (bind mounts) y se corrigió horneando la configuración en las imágenes |
-| 6 | CI de este repo (`.github/workflows/ci.yaml`, 6 jobs de validación + `deploy`) | hecha: validación por componente (probada en verde y en rojo) y deploy a Coolify condicionado a ella |
+| 1 | Métricas del servidor y de los contenedores (node_exporter, cAdvisor) + Prometheus | hecha |
+| 2 | Sondas HTTP a las URLs públicas y caducidad de certificados (blackbox) | hecha (6 URLs) |
+| 3 | Reglas de alerta con tests unitarios y avisos a Telegram (Alertmanager) | hecha |
+| 4 | Grafana con dashboard provisionado, tras Traefik | hecha |
+| 5 | Despliegue en Coolify y medida real de RAM en el VPS | hecha: el primer intento falló (bind mounts) y se corrigió horneando la configuración en las imágenes |
+| 6 | CI/CD de este repo (`.github/workflows/ci.yaml`, 6 jobs de validación + `deploy`) | hecha: validación por componente (probada en verde y en rojo) y deploy a Coolify condicionado a ella |
 
 ## Estructura
 
@@ -377,6 +384,10 @@ formato de Telegram y revisa el árbol actual, no el historial.
 (Grafana 13.2.4 en la misma prueba: 300-320 MB, pegada a un tope de 320.) Pendiente de
 confirmar en el VPS, con ~16 contenedores y días de datos: Prometheus crece con el tiempo.
 
+## Licencia
+
+MIT, ver [LICENSE](LICENSE).
+
 ---
 
 # infra (English)
@@ -385,7 +396,10 @@ Shared infrastructure for the VPS hosting Paufer, Gast-On and Multas, as code.
 Currently holds the **monitoring stack**: Prometheus scraping node_exporter (host), cAdvisor
 (containers) and blackbox probes (6 public URLs) every 30 s; alert rules unit-tested with
 `promtool`, delivered through Alertmanager to Telegram, with a provisioned Grafana dashboard
-(config-as-code, behind Traefik). Next: deploy on Coolify and CI for this repo.
+(config-as-code, behind Traefik). Deployed to production on Coolify (~350 MB RAM) through a
+GitHub Actions pipeline that builds and validates each image (promtool, amtool, config checks)
+and only then triggers the deploy. A personal DevOps learning project, built step by step with
+an AI assistant (Claude Code) as copilot.
 
 - Image versions are pinned (never `latest`) and every service has a `mem_limit` — the VPS has
   4 GB and no swap.
@@ -400,3 +414,7 @@ docker compose -f docker-compose.yaml -f docker-compose.local.yaml up -d --build
 Configuration is **baked into the images** (one Dockerfile per service): a Coolify Docker
 Compose resource does not place the repo at a path usable for file bind mounts, but `build:`
 does use the repo clone. Changing config means rebuild + redeploy.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
