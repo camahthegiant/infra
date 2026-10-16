@@ -51,9 +51,12 @@ receivers:
       # entorno TELEGRAM_BOT_TOKEN.
       - bot_token_file: /tmp/telegram_token
 
-        # Identifica TU conversación con el bot. No es un secreto en sentido
-        # fuerte (sin el token nadie puede escribirte) y el repo es privado.
-        chat_id: 1258958726
+        # Identifica TU conversación con el bot. No es un secreto fuerte (sin el
+        # token nadie puede escribirte), pero es un dato personal y este repo es
+        # público: igual que el token, NO está aquí. Se lee de un fichero que el
+        # compose escribe al arrancar a partir de TELEGRAM_CHAT_ID (variable de
+        # entorno de Coolify).
+        chat_id_file: /tmp/telegram_chat_id
 
         # Manda un segundo mensaje cuando el problema desaparece. Sin esto
         # nunca sabrías si algo se arregló solo: te quedarías mirando una

@@ -54,6 +54,7 @@ jobs:
         # se pone rojo.
         env:
           TELEGRAM_BOT_TOKEN: ficticio-solo-para-validar
+          TELEGRAM_CHAT_ID: "1"
           GRAFANA_ADMIN_PASSWORD: ficticio-solo-para-validar
         # Qué hace el script de abajo (los comentarios van AQUÍ, fuera del "run",
         # a propósito: dentro de un bloque "run: |" todo es script de shell, y un
@@ -125,8 +126,10 @@ jobs:
         run: docker build -q -t infra-alertmanager:ci alertmanager
 
       # amtool viene dentro de la imagen de Alertmanager. Antes de validar se crea
-      # un /tmp/telegram_token FALSO porque alertmanager.yml dice "bot_token_file:
-      # /tmp/telegram_token" y amtool comprueba que ese fichero EXISTA. En
+      # un /tmp/telegram_token y un /tmp/telegram_chat_id FALSOS porque
+      # alertmanager.yml dice "bot_token_file: /tmp/telegram_token" y
+      # "chat_id_file: /tmp/telegram_chat_id", y amtool comprueba que esos
+      # ficheros EXISTAN (el chat_id, igual que el token, no está en el repo). En
       # producción lo escribe el arranque del contenedor a partir del secret de
       # Coolify; aquí no hay secret, así que se simula con la palabra "falso".
       # Sin esa línea la validación fallaría por una razón que no es un error
@@ -134,7 +137,7 @@ jobs:
       # (--rm): no se escribe nada en el runner. Se usa "sh -c" porque son dos
       # órdenes encadenadas con && (si la primera falla, no se ejecuta la segunda).
       - name: Validar la configuración dentro de la imagen
-        run: docker run --rm --entrypoint sh infra-alertmanager:ci -c 'echo falso > /tmp/telegram_token && amtool check-config /etc/alertmanager/alertmanager.yml'
+        run: docker run --rm --entrypoint sh infra-alertmanager:ci -c 'echo falso > /tmp/telegram_token && echo 1 > /tmp/telegram_chat_id && amtool check-config /etc/alertmanager/alertmanager.yml'
 
   # ---------------------------------------------------------------------------
   # blackbox: ¿se carga nuestra configuración de sondas? Protege de un fallo
