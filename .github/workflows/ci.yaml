@@ -15,12 +15,16 @@ permissions:
   contents: read
 
 # Si subes dos commits seguidos a la misma rama, cancela la ejecución vieja y
-# deja solo la nueva: la vieja ya no importa. Es seguro cancelar PORQUE este CI
-# es de solo lectura. (En el deploy de Paufer es al revés, cancel-in-progress:
-# false, porque interrumpir un despliegue a medias sí sería peligroso.)
+# deja solo la nueva: la vieja ya no importa. Solo se cancela en PULL REQUESTS,
+# donde el CI es de solo lectura y cancelar es seguro.
+# En main NO se cancela nunca: ahí corre el job "deploy", y cancelar un
+# despliegue a medias (dos pushes seguidos) podría dejar producción en un
+# estado raro. Antes esto era "cancel-in-progress: true" a secas, y habría
+# cancelado un deploy en curso en cuanto llegara otro push. Es el mismo motivo
+# por el que en el deploy de Paufer es false.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -225,3 +229,64 @@ jobs:
             echo "::error::Hay algo con forma de token de bot de Telegram en los ficheros de arriba."
             exit 1
           fi
+
+  # ---------------------------------------------------------------------------
+  # deploy: despliega en Coolify SOLO si todo lo anterior pasa. Coolify tiene el
+  # Auto Deploy desactivado a propósito: este job es el único camino automático
+  # al servidor. Sin esto, Coolify desplegaría a la vez que corre el CI y un
+  # alertmanager.yml roto llegaría a producción aunque el CI lo hubiera parado
+  # (dejaría los avisos mudos, sin ningún error visible).
+  # ---------------------------------------------------------------------------
+  deploy:
+    runs-on: ubuntu-24.04
+
+    # El gate: este job no empieza hasta que los seis anteriores terminan EN
+    # VERDE. Si cualquiera falla, "deploy" se salta y producción sigue como estaba.
+    needs: [compose, prometheus, alertmanager, blackbox, grafana, secretos]
+
+    # Solo en un push a main (es decir, tras mergear). En un pull request se
+    # salta: si no, cada PR, incluida la demostración con el bug, intentaría
+    # desplegar.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    # Los secrets COOLIFY_WEBHOOK y COOLIFY_TOKEN viven en este entorno, no a
+    # nivel de repositorio: solo un job que declare "environment: production"
+    # puede leerlos. Los jobs de validación (y los de los PRs) nunca los ven. De
+    # paso, GitHub guarda un historial de despliegues a este entorno.
+    environment: production
+
+    # Dos despliegues nunca se solapan: si llega otro push mientras uno está en
+    # marcha, espera su turno. false = nunca interrumpir un despliegue a medias.
+    concurrency:
+      group: deploy-infra
+      cancel-in-progress: false
+
+    steps:
+      # Sin checkout: este job no necesita el código, solo llamar a una URL.
+      #
+      # Los secrets pasan por "env:" y se leen como "$VARIABLE" en el script, no
+      # escritos como ${{ secrets.X }} dentro del "run": GitHub sustituiría el
+      # texto en el comando, y un valor con comillas o caracteres raros podría
+      # romperlo o inyectar órdenes. Además GitHub los enmascara en los logs.
+      #
+      # curl: --fail hace que devuelva error si Coolify responde 4xx/5xx; sin
+      # él, un 401 saldría "en verde" y creerías que desplegó. --silent
+      # --show-error quita la barra de progreso pero enseña el error si lo hay.
+      # Este paso solo DISPARA el despliegue; no espera a que termine. Si Coolify
+      # falla después al construir, el job ya habrá salido en verde: el resultado
+      # real se mira en Coolify y en los avisos del propio sistema.
+      #
+      # LIMITACIÓN conocida: el webhook va por http:// (el panel de Coolify no
+      # tiene HTTPS), así que el token viaja en claro. Por eso solo tiene permiso
+      # de "deploy". Mejora pendiente: dominio con HTTPS para el panel.
+      - name: Disparar el deploy en Coolify
+        env:
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        # El "|" aquí NO es por tener varias líneas (es una sola): es porque el
+        # comando contiene "Authorization: Bearer", con dos puntos y un espacio.
+        # En un valor YAML normal, ": " significa "clave: valor" y el lector se
+        # confunde ("mapping values are not allowed in this context"). Con "|" el
+        # contenido es texto literal y los dos puntos dejan de importar.
+        run: |
+          curl --fail --silent --show-error -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_WEBHOOK"

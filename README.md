@@ -12,7 +12,7 @@ Hoy contiene la **monitorización**: saber qué está caído o saturado antes de
 | 3 | Reglas de alerta y avisos a Telegram (Alertmanager) | hecha: envío real y ciclo firing/resolved probados; reglas con tests unitarios |
 | 4 | Grafana con dashboard provisionado, tras Traefik | hecha, probada en local (7/7 paneles con datos) |
 | 5 | Despliegue en Coolify y medida real de RAM en el VPS | en curso: el primer intento falló (bind mounts) y se corrigió horneando la configuración en las imágenes |
-| 6 | CI de este repo (`.github/workflows/ci.yaml`, 6 jobs) | hecha: validación por componente, probada en local en el caso que pasa y en el que falla |
+| 6 | CI de este repo (`.github/workflows/ci.yaml`, 6 jobs de validación + `deploy`) | hecha: validación por componente (probada en verde y en rojo) y deploy a Coolify condicionado a ella |
 
 ## Estructura
 
@@ -260,7 +260,7 @@ sabotear una regla (quitar el `for`, subir un umbral) los hace fallar.
 
 ## CI
 
-`.github/workflows/ci.yaml`: se ejecuta en cada pull request y en cada push a `main`. Seis jobs
+`.github/workflows/ci.yaml`: se ejecuta en cada pull request y en cada push a `main`. Seis jobs de validación
 independientes y en paralelo; si falla uno, su nombre dice qué componente está roto. Es la
 versión automática de "Validar sin arrancar nada".
 
@@ -272,6 +272,7 @@ versión automática de "Validar sin arrancar nada".
 | `blackbox` | Su configuración dentro de la imagen | Usar sin querer los módulos por defecto, en silencio |
 | `grafana` | `vps.json` coincide con su generador **y** el test del volumen | Editar el JSON a mano; la portada tapada por un volumen (ya pasó) |
 | `secretos` | Ningún token de Telegram en el árbol | Subir el token por despiste |
+| `deploy` | Dispara el despliegue en Coolify **solo si los seis anteriores pasan** y solo en push a `main` | Que un `alertmanager.yml` roto llegue a producción aunque el CI lo hubiera parado |
 
 Principios:
 
@@ -288,6 +289,17 @@ Principios:
   para no imprimir un token si lo encuentra.
 - **Runner fijado** (`ubuntu-24.04`, no `latest`) y permisos del `GITHUB_TOKEN` mínimos
   (`contents: read`).
+- **El pipeline es el único camino automático a producción.** Coolify tiene el Auto Deploy
+  **desactivado**: con él activado, Coolify desplegaba a la vez que corría el CI y un cambio roto
+  llegaba al servidor aunque el CI saliera en rojo. El job `deploy` tiene `needs:` de los seis
+  jobs, `if:` solo push a `main`, y los secrets (`COOLIFY_WEBHOOK`, `COOLIFY_TOKEN`, este último
+  con permiso solo de `deploy`) viven en el entorno `production`, no a nivel de repositorio.
+- **`cancel-in-progress` solo en pull requests.** En `main` nunca se cancela: ahí corre el
+  deploy y interrumpir un despliegue a medias puede dejar producción en un estado raro.
+  (Un `cancel-in-progress: true` global habría cancelado un deploy en curso al llegar otro push.)
+- **El `deploy` solo dispara, no espera.** Si Coolify falla después al construir, el job ya habrá
+  salido en verde: el resultado real se mira en Coolify y en los avisos del propio sistema.
+  Limitación: el webhook va por `http://` (el panel de Coolify no tiene HTTPS).
 - **Los comentarios van fuera de los `run:`.** Dentro de `run: |` todo es script de shell; un `#`
   ahí es un comentario de shell y confunde al editor. Y el `|` es imprescindible cuando hay varios
   comandos: sin él YAML los une en una sola línea.
