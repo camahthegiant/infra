@@ -12,7 +12,7 @@ Hoy contiene la **monitorización**: saber qué está caído o saturado antes de
 | 3 | Reglas de alerta y avisos a Telegram (Alertmanager) | hecha: envío real y ciclo firing/resolved probados; reglas con tests unitarios |
 | 4 | Grafana con dashboard provisionado, tras Traefik | hecha, probada en local (7/7 paneles con datos) |
 | 5 | Despliegue en Coolify y medida real de RAM en el VPS | en curso: el primer intento falló (bind mounts) y se corrigió horneando la configuración en las imágenes |
-| 6 | CI de este repo (los comandos de "Validar sin arrancar nada") | pendiente |
+| 6 | CI de este repo (`.github/workflows/ci.yaml`, 6 jobs) | hecha: validación por componente, probada en local en el caso que pasa y en el que falla |
 
 ## Estructura
 
@@ -258,7 +258,50 @@ scripts/check-no-shadowed-config.sh
 Los tests son equivalentes a `pytest` para la monitorización. Se comprobó que tienen dientes:
 sabotear una regla (quitar el `for`, subir un umbral) los hace fallar.
 
+## CI
+
+`.github/workflows/ci.yaml`: se ejecuta en cada pull request y en cada push a `main`. Seis jobs
+independientes y en paralelo; si falla uno, su nombre dice qué componente está roto. Es la
+versión automática de "Validar sin arrancar nada".
+
+| Job | Qué comprueba | Fallo real que previene |
+|---|---|---|
+| `compose` | El compose es válido (con secretos ficticios) | Una errata que tumbe el despliegue |
+| `prometheus` | Su configuración **dentro de la imagen construida** + los tests unitarios de las reglas | Reglas rotas, o un `COPY` que apunta a otra ruta |
+| `alertmanager` | Su configuración dentro de la imagen | La indentación mal puesta que deja los avisos **mudos** (ya pasó) |
+| `blackbox` | Su configuración dentro de la imagen | Usar sin querer los módulos por defecto, en silencio |
+| `grafana` | `vps.json` coincide con su generador **y** el test del volumen | Editar el JSON a mano; la portada tapada por un volumen (ya pasó) |
+| `secretos` | Ningún token de Telegram en el árbol | Subir el token por despiste |
+
+Principios:
+
+- **Se valida el artefacto, no el fuente.** Se construye cada imagen y la herramienta de
+  validación se ejecuta *dentro* de ella (`docker run --rm --entrypoint promtool ...`): es un
+  contenedor que vive milisegundos, no un servicio levantado. Lo que se comprueba es lo que
+  se despliega.
+- **La versión de cada herramienta vive en un solo sitio**: el `FROM` del Dockerfile. El CI usa
+  el `promtool` de la imagen construida; no repite el número de versión.
+- **Sin secretos de GitHub.** El CI no necesita el token real: solo comprueba estructura. Los
+  valores ficticios (`env:` del job `compose`, el `/tmp/telegram_token` falso de `alertmanager`)
+  viven dentro de un paso o de un contenedor desechable. Un fallo del CI no puede filtrar el
+  token porque no existe de ese lado. El job `secretos` usa `grep -l` (solo nombres de fichero)
+  para no imprimir un token si lo encuentra.
+- **Runner fijado** (`ubuntu-24.04`, no `latest`) y permisos del `GITHUB_TOKEN` mínimos
+  (`contents: read`).
+- **Los comentarios van fuera de los `run:`.** Dentro de `run: |` todo es script de shell; un `#`
+  ahí es un comentario de shell y confunde al editor. Y el `|` es imprescindible cuando hay varios
+  comandos: sin él YAML los une en una sola línea.
+
+Límites: no levanta el compose (no hay test de integración: las sondas de blackbox apuntan a las
+webs reales y acoplarían el CI a su disponibilidad), y el escáner de secretos solo conoce el
+formato de Telegram y revisa el árbol actual, no el historial.
+
 ## Decisiones y por qué
+
+- **Extensiones: `.yaml` para lo nuestro** (el compose y el workflow); los ficheros de
+  configuración de cada herramienta mantienen el nombre que usa su documentación
+  (`prometheus.yml`, `alertmanager.yml`...). Ambas extensiones son equivalentes para YAML; se
+  eligió `.yaml` por ser la recomendada y la que propone Coolify por defecto.
 
 - **Versiones de imagen fijadas, nunca `latest`.** Un redeploy no debe traer una versión distinta
   sin avisar (así cayó Gast-On el 2026-09-25 con SQLAlchemy 2.1).
