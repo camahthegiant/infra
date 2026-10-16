@@ -1,0 +1,227 @@
+name: CI
+
+# Cuándo se ejecuta: en cada pull request (para enterarte ANTES de mezclar algo
+# roto) y cuando algo entra en main. Sin "pull_request" te enterarías de un fallo
+# después de mezclarlo, no antes.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Permisos del GITHUB_TOKEN de TODO el workflow: solo leer el repo. Este CI solo
+# valida, nunca escribe nada, así que no necesita más (mínimo privilegio). Lo que
+# no se lista queda sin permiso.
+permissions:
+  contents: read
+
+# Si subes dos commits seguidos a la misma rama, cancela la ejecución vieja y
+# deja solo la nueva: la vieja ya no importa. Es seguro cancelar PORQUE este CI
+# es de solo lectura. (En el deploy de Paufer es al revés, cancel-in-progress:
+# false, porque interrumpir un despliegue a medias sí sería peligroso.)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # compose: ¿es válido el docker-compose? Cada job es una máquina nueva y vacía,
+  # y los jobs corren en paralelo sin conocerse: si falla uno, su nombre ya dice
+  # qué componente está roto.
+  # ---------------------------------------------------------------------------
+  compose:
+    # Versión del sistema FIJADA, no "ubuntu-latest": GitHub avisó de que
+    # "latest" pasa a Ubuntu 26 el 2026-10-19. Es el mismo problema que usar
+    # "latest" en una imagen Docker: un CI que cambia de comportamiento sin que
+    # nadie toque el repo. (Se repite en cada job a propósito: cada uno es una
+    # máquina distinta.)
+    runs-on: ubuntu-24.04
+    steps:
+      # La máquina está vacía: sin esto no habría compose que validar.
+      - uses: actions/checkout@v7
+
+      - name: Validar el compose
+        # Valores FICTICIOS, y solo viven durante este paso: no son secrets de
+        # GitHub ni se guardan en ningún sitio. Hacen falta porque el compose
+        # declara estas dos variables como obligatorias (${VAR:?...}): sin ellas,
+        # "docker compose config" falla A PROPÓSITO y el CI estaría siempre en
+        # rojo. El CI nunca necesita el token real porque no envía nada; solo
+        # comprueba que la estructura es correcta. Y de paso demuestra que la
+        # protección del ":?" existe: si se quitan estas dos líneas, el job
+        # se pone rojo.
+        env:
+          TELEGRAM_BOT_TOKEN: ficticio-solo-para-validar
+          GRAFANA_ADMIN_PASSWORD: ficticio-solo-para-validar
+        # Qué hace el script de abajo (los comentarios van AQUÍ, fuera del "run",
+        # a propósito: dentro de un bloque "run: |" todo es script de shell, y un
+        # "#" ahí sería un comentario de shell, no de YAML; en el editor se ve
+        # como código y confunde):
+        #   1. docker compose config -q valida el compose. -q no imprime el
+        #      resultado resuelto, solo falla si algo está mal.
+        #   2. Lo mismo con el compose combinado con el de local: sin esto podrías
+        #      romper docker-compose.local.yaml y enterarte en la siguiente
+        #      prueba en tu máquina.
+        # El "|" es IMPRESCINDIBLE: dice "lo de debajo es texto literal, línea a
+        # línea". Sin él YAML intenta unir las líneas en una sola, y el segundo
+        # comando queda suelto: error de sintaxis.
+        run: |
+          docker compose -f docker-compose.yaml config -q
+          docker compose -f docker-compose.yaml -f docker-compose.local.yaml config -q
+
+  # ---------------------------------------------------------------------------
+  # prometheus: ¿está bien la configuración y las reglas SALTAN cuando deben?
+  # Es el job más importante: una errata aquí deja la monitorización muda y sin
+  # avisar de nada (justo lo que este sistema existe para evitar).
+  # ---------------------------------------------------------------------------
+  prometheus:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # Ejecuta el Dockerfile de Prometheus, el MISMO que usa Coolify. -q no
+      # imprime las capas, solo el id; -t le pone nombre para usarla después.
+      # Se valida lo que de verdad se despliega, no los ficheros fuente: si un
+      # COPY apuntara a otra ruta o faltara una regla, validar el fuente daría
+      # "todo bien" y producción arrancaría con otra cosa. (Lección del volumen
+      # que tapó la portada de Grafana: probar el ARTEFACTO.)
+      - name: Construir la imagen
+        run: docker build -q -t infra-prometheus:ci prometheus
+
+      # promtool viene DENTRO de la imagen de Prometheus. Se ejecuta sobre
+      # /etc/prometheus/prometheus.yml, la ruta de la imagen ya construida (no la
+      # del repo). "check config" también sigue rule_files y comprueba que las
+      # reglas se encuentran donde las dejó el COPY y que compilan.
+      - name: Validar la configuración dentro de la imagen
+        run: docker run --rm --entrypoint promtool infra-prometheus:ci check config /etc/prometheus/prometheus.yml
+
+      # Tests unitarios de las reglas: ¿saltan cuando deben y NO saltan cuando no
+      # (p. ej. un redeploy de ~1 min no debe avisar)? tests/ está en el
+      # .dockerignore y NO entra en la imagen, así que se monta desde el repo solo
+      # para este paso (-v ...:ro, solo lectura).
+      # Usa el promtool de la imagen construida y no "prom/prometheus:v3.15.0"
+      # escrito aquí: así la versión de Prometheus vive en UN solo sitio (el FROM
+      # del Dockerfile). Duplicarla es una causa clásica de "validé con una
+      # versión y desplegué otra".
+      - name: Tests unitarios de las reglas
+        run: docker run --rm --entrypoint promtool -v "$PWD/prometheus:/p:ro" infra-prometheus:ci test rules /p/tests/alerts_test.yml
+
+  # ---------------------------------------------------------------------------
+  # alertmanager: ¿es válida la política de avisos? Es el job más crítico junto
+  # con el de Prometheus: un alertmanager.yml roto deja los avisos MUDOS, sin
+  # ningún error visible. Ya nos pasó una vez: chat_id alineado con el guion y no
+  # con la clave; "amtool" lo cazó antes de desplegar, y aquí lo caza en cada push.
+  # ---------------------------------------------------------------------------
+  alertmanager:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # Se construye la imagen y se valida DENTRO de ella, igual que Prometheus:
+      # se prueba el artefacto que se despliega, no el fichero fuente.
+      - name: Construir la imagen
+        run: docker build -q -t infra-alertmanager:ci alertmanager
+
+      # amtool viene dentro de la imagen de Alertmanager. Antes de validar se crea
+      # un /tmp/telegram_token FALSO porque alertmanager.yml dice "bot_token_file:
+      # /tmp/telegram_token" y amtool comprueba que ese fichero EXISTA. En
+      # producción lo escribe el arranque del contenedor a partir del secret de
+      # Coolify; aquí no hay secret, así que se simula con la palabra "falso".
+      # Sin esa línea la validación fallaría por una razón que no es un error
+      # real de configuración. Todo ocurre dentro de un contenedor desechable
+      # (--rm): no se escribe nada en el runner. Se usa "sh -c" porque son dos
+      # órdenes encadenadas con && (si la primera falla, no se ejecuta la segunda).
+      - name: Validar la configuración dentro de la imagen
+        run: docker run --rm --entrypoint sh infra-alertmanager:ci -c 'echo falso > /tmp/telegram_token && amtool check-config /etc/alertmanager/alertmanager.yml'
+
+  # ---------------------------------------------------------------------------
+  # blackbox: ¿se carga nuestra configuración de sondas? Protege de un fallo
+  # silencioso: si blackbox.yml no se cargara (ruta equivocada, COPY que falta),
+  # blackbox NO fallaría: usaría los módulos por defecto de la imagen y nuestras
+  # decisiones (fail_if_not_ssl, IPv4, timeout...) se ignorarían sin avisar.
+  # ---------------------------------------------------------------------------
+  blackbox:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Construir la imagen
+        run: docker build -q -t infra-blackbox:ci blackbox
+
+      # Blackbox no trae una herramienta aparte: se valida a sí mismo con
+      # --config.check, que lee el fichero, lo comprueba y sale. La ruta
+      # (/etc/blackbox/blackbox.yml) es la del COPY del Dockerfile, la misma que
+      # usa --config.file en el compose; si alguna de las dos cambiara y la otra
+      # no, esto falla aquí y no en producción.
+      - name: Validar la configuración dentro de la imagen
+        run: docker run --rm infra-blackbox:ci --config.check --config.file=/etc/blackbox/blackbox.yml
+
+  # ---------------------------------------------------------------------------
+  # grafana: dos comprobaciones que no son "validar un fichero":
+  #   1. que el JSON de la portada no se haya desincronizado de su generador;
+  #   2. que la configuración horneada no vuelva a quedar tapada por un volumen.
+  # ---------------------------------------------------------------------------
+  grafana:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # vps.json NO se edita a mano: lo GENERA grafana/tools/gen_vps_dashboard.py
+      # (un JSON de ~600 líneas no admite comentarios ni se mantiene a mano).
+      # Este paso ejecuta el generador, que reescribe vps.json, y luego
+      # "git diff --exit-code" pregunta: ¿ha cambiado el fichero respecto a lo
+      # commiteado? Si cambió, sale con error y el job se pone rojo. Caza dos
+      # errores fáciles de cometer:
+      #   - editar vps.json a mano (el cambio se perdería la próxima vez que
+      #     alguien ejecute el generador);
+      #   - cambiar el generador y olvidar regenerar el JSON (producción
+      #     mostraría la portada vieja aunque el código diga otra cosa).
+      # El "|" es imprescindible aquí porque son DOS comandos, uno por línea.
+      # Python 3 ya viene en el runner: no hace falta instalar nada.
+      - name: La portada coincide con su generador
+        run: |
+          python3 grafana/tools/gen_vps_dashboard.py
+          git diff --exit-code -- grafana/dashboards/vps.json
+
+      # El test que nació del incidente del 2026-10-15: monta un volumen que YA
+      # contiene datos (como el de producción en cada redeploy) y comprueba que la
+      # ruta de dashboards que lee Grafana sigue conteniendo la portada. Falla si
+      # alguien vuelve a poner configuración bajo la ruta de un volumen. El script
+      # construye su propia imagen y se limpia solo. Necesita el bit de ejecución
+      # (git lo guarda como modo 100755).
+      - name: La configuración horneada sobrevive a un volumen existente
+        run: scripts/check-no-shadowed-config.sh
+
+  # ---------------------------------------------------------------------------
+  # secretos: red de seguridad barata contra el error más probable: pegar el
+  # token del bot en un fichero por despiste. NO es un escáner completo (ver
+  # límites abajo).
+  # ---------------------------------------------------------------------------
+  secretos:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # Un token de bot de Telegram tiene una forma muy reconocible: 8-10 dígitos,
+      # dos puntos y 35 caracteres alfanuméricos (1234567890:AAH...). El patrón
+      # lo busca en TODO el árbol del repo.
+      #   -r  recursivo        -E  expresión regular extendida
+      #   -l  lista solo el NOMBRE del fichero que coincide, NO la línea. Es
+      #       deliberado: con -n se imprimiría el token entero en el log del CI,
+      #       es decir, el job filtraría el secreto justo al detectarlo.
+      # Se excluye .git (historial interno) y .github porque el propio patrón está
+      # escrito en este workflow y el job se encontraría a sí mismo.
+      # Cómo funciona el if: grep sale con 0 si ENCUENTRA algo (y entonces se
+      # entra en el if y se hace fallar el job) y con 1 si no encuentra nada (y
+      # entonces el job pasa). Va con "|" porque son varios comandos.
+      #
+      # LÍMITES, para no confiar de más:
+      #  - Solo detecta el formato de Telegram, no la contraseña de Grafana ni
+      #    claves de otros servicios. Si el repo creciera, lo natural es sustituirlo
+      #    por una herramienta dedicada (gitleaks), que cubre cientos de formatos.
+      #  - Revisa el árbol ACTUAL, no el historial: un token commiteado y borrado
+      #    después seguiría en el historial de git y este job pasaría.
+      - name: Buscar tokens de Telegram en el repo
+        run: |
+          if grep -rEl '[0-9]{8,10}:[A-Za-z0-9_-]{35}' --exclude-dir=.git --exclude-dir=.github .; then
+            echo "::error::Hay algo con forma de token de bot de Telegram en los ficheros de arriba."
+            exit 1
+          fi
