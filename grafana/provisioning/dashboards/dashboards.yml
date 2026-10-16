@@ -46,4 +46,4 @@ providers:
       #
       # NO puede estar bajo /var/lib/grafana: ahí se monta el volumen de datos
       # y taparía los dashboards de la imagen (ver el comentario del COPY).
-      path: /etc/grafana/dashboards
+      path: /var/lib/grafana/dashboards

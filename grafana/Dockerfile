@@ -34,7 +34,7 @@ COPY provisioning/ /etc/grafana/provisioning/
 #   REGLA: el volumen guarda lo que Grafana ESCRIBE; lo que nosotros le DAMOS va
 #   en la imagen, en una ruta que ningún volumen pise.
 #   La comprueba scripts/check-no-shadowed-config.sh.
-COPY dashboards/ /etc/grafana/dashboards/
+COPY dashboards/ /var/lib/grafana/dashboards/
 
 # Grafana corre como el usuario 472 (heredado de la imagen). Los ficheros
 # copiados quedan como root con permisos 644/755: legibles para él, no hace
