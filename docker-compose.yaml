@@ -211,6 +211,7 @@ services:
     command:
       - >
         echo "$$TELEGRAM_BOT_TOKEN" > /tmp/telegram_token &&
+        echo "$$TELEGRAM_CHAT_ID" > /tmp/telegram_chat_id &&
         exec /bin/alertmanager
         --config.file=/etc/alertmanager/alertmanager.yml
         --storage.path=/alertmanager
@@ -235,6 +236,12 @@ services:
       # es justo lo que NO debe pasar. El CI le pasa un valor ficticio, porque
       # solo valida la estructura y no envía nada.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?falta el secret TELEGRAM_BOT_TOKEN}
+
+      # Tu identificador de conversación con el bot (un número). También
+      # obligatorio (":?"): si falta, el despliegue falla en voz alta en vez de
+      # arrancar Alertmanager sin saber a quién avisar. Vive en Coolify, no en
+      # el repo, porque el repo es público.
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?falta la variable TELEGRAM_CHAT_ID}
 
     volumes:
       # Guarda los silencios y qué alertas ya se notificaron. Sin él, cada

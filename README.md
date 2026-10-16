@@ -184,22 +184,37 @@ que el primer arranque nunca sea con `admin/admin`.
 
 ## Secretos
 
-Nunca van en el repo. Los dos son obligatorios (`${...:?}` en el compose): si falta alguno, el
+Nunca van en el repo. Son obligatorios (`${...:?}` en el compose): si falta alguno, el
 despliegue falla en ese momento en vez de arrancar "en verde" con un servicio mudo o abierto.
 
 | Variable | Para qué | Si faltara sin `:?` |
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | Que Alertmanager pueda enviar mensajes | Arrancaría sin poder avisar de nada |
+| `TELEGRAM_CHAT_ID` | A qué conversación del bot avisa (un número) | Arrancaría sin saber a quién avisar |
 | `GRAFANA_ADMIN_PASSWORD` | Contraseña del admin de Grafana | Arrancaría con `admin/admin` |
 | `GRAFANA_ADMIN_USER` (opcional) | Nombre del admin; `admin` por defecto | — |
 
-En producción son secrets de Coolify; en local se pasan por la terminal y desaparecen con ella.
+En producción son variables de Coolify; en local se pasan por la terminal y desaparecen con ella.
+Ni el token ni el `chat_id` están en el repo: `alertmanager.yml` solo dice de qué ficheros
+leerlos (`bot_token_file`, `chat_id_file`), y el `entrypoint` del compose los escribe en `/tmp`
+al arrancar el contenedor. El `chat_id` no es un secreto fuerte, pero es un dato personal y este
+repo es público.
+
+Cómo obtener el `chat_id`: escribe cualquier mensaje a tu bot y consulta `getUpdates` con el token
+(sin dejar el token en el historial de la shell):
+
+```fish
+read -s TG_TOKEN
+curl -s "https://api.telegram.org/bot$TG_TOKEN/getUpdates" | python3 -c 'import sys,json; [print(u["message"]["chat"]["id"]) for u in json.load(sys.stdin)["result"] if "message" in u]'
+set -e TG_TOKEN
+```
 
 ## Probar en local
 
 ```fish
 # Los secretos pasan por tu teclado, nunca por un fichero ni por el historial
 read -s -x TELEGRAM_BOT_TOKEN
+set -x TELEGRAM_CHAT_ID 123456789       # cualquier número vale para probar en local
 read -s -x GRAFANA_ADMIN_PASSWORD       # en local, una desechable: NO la de producción
 # --build es obligatorio tras cambiar configuración: va dentro de la imagen
 docker compose -f docker-compose.yaml -f docker-compose.local.yaml up -d --build
@@ -225,7 +240,7 @@ curl -s -X POST http://127.0.0.1:9093/api/v2/alerts -H 'Content-Type: applicatio
 Es lo que ejecutará el CI. Ninguna necesita secretos reales: se pasan valores ficticios.
 
 ```bash
-TELEGRAM_BOT_TOKEN=ficticio GRAFANA_ADMIN_PASSWORD=ficticio docker compose config -q
+TELEGRAM_BOT_TOKEN=ficticio TELEGRAM_CHAT_ID=1 GRAFANA_ADMIN_PASSWORD=ficticio docker compose config -q
 
 # Tests unitarios de las reglas: ¿saltan cuando deben y NO saltan cuando no?
 # (tests/ no entra en la imagen, así que se ejecutan desde el fuente)
@@ -342,10 +357,10 @@ formato de Telegram y revisa el árbol actual, no el historial.
 - cAdvisor monta `/var/run` (socket de Docker). El `:ro` no limita lo que se puede ordenar a
   Docker a través del socket: es un riesgo conocido y aceptado (imagen oficial, versión fijada,
   sin exponer). **Nunca publicar su puerto.**
-- Los secretos (token del bot de Telegram, contraseña de Grafana) viven en Coolify, nunca en este repo.
-- **Antes de hacer público este repo:** `alertmanager/alertmanager.yml` lleva el `chat_id` de
-  Telegram en claro (sin el token nadie puede escribir con él, pero es un dato personal), y
-  `prometheus.yml` y el compose los subdominios reales. Sacar el `chat_id` a una variable.
+- Los secretos (token del bot de Telegram, `chat_id`, contraseña de Grafana) viven en Coolify,
+  nunca en este repo.
+- Los subdominios que aparecen (`grafana.paufer.es`, etc.) son públicos de por sí (DNS y
+  certificados). El repo no contiene ninguna IP ni dato personal.
 
 ## Medido (local, ~2 min tras arrancar, 5-9 contenedores en el host)
 
